@@ -1,5 +1,5 @@
 // eDrawings Viewer: network first (so updates arrive), cache fallback (so it works offline).
-const CACHE='edrawings-viewer-v3';
+const CACHE='edrawings-viewer-v4';
 const FILES=["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "three.min.js", "OrbitControls.js", "LineSegmentsGeometry.js", "LineMaterial.js", "LineSegments2.js", "fflate.js", "easm-core.js", "app.js"];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});

@@ -67,8 +67,31 @@ var EASM = (function () {
     seg('/');
     var stack = ['/'];
     var last = null;
-    var p = 0, shellCount = 0, stopInfo = null;
+    var p = 0, shellCount = 0, stopInfo = null, repeats = [], shellByKey = new Map();
     var u16 = function (q) { return dv.getUint16(q, true); };
+    function printable(a, b) { for (var i = a; i < b; i++) { var ch = d[i]; if (ch < 0x20 || (ch > 0x7e && ch < 0xa0)) return false; } return true; }
+    // Does a run of ordinary records start at q? Used to find the end of variable-length records.
+    function plausible(q) {
+      for (var n = 0; n < 4; n++) {
+        if (q >= N) return false;
+        var c = d[q];
+        if (c === 0x29 || c === 0x71) { q += 1; continue; }
+        if (c === 0x28) { var L = d[q + 1]; if (!printable(q + 2, q + 2 + L)) return false; q += 2 + L; continue; }
+        if (c === 0x55) { var L2 = u16(q + 1); if (L2 > 60000 || !printable(q + 3, q + 3 + L2)) return false; q += 3 + L2; continue; }
+        if (c === 0x3c) { if (d[q + 1] !== 0) return false; var L3 = d[q + 2]; if (!printable(q + 3, q + 3 + L3)) return false; q += 3 + L3; continue; }
+        if (c === 0x25) { q += 49; continue; }
+        if (c === 0x16) { var L4 = u16(q + 1); if (L4 > 30000) return false; q += 3 + 2 * L4; continue; }
+        if (c === 0x53 || c === 0x52 || c === 0x56 || c === 0x7e || c === 0x48) return n > 0;
+        return false;
+      }
+      return true;
+    }
+    // R: three mask/value pairs, then option data whose length depends on the masks.
+    function skipRendering(q) {
+      var start = q + 24;
+      for (var k = 0; k <= 4096 && start + k < N; k++) if (plausible(start + k)) return start + k;
+      throw 'stop';
+    }
     var i32 = function (q) { return dv.getInt32(q, true); };
     try {
       while (p < N) {
@@ -98,6 +121,15 @@ var EASM = (function () {
             for (var k = 0; k < 12; k++) m[k] = dv.getFloat32(p + 1 + 4 * k, true);
             segs.get(cur).matrix = m; p += 49; break;
           case 0x24: p += 48; break; // $ texture matrix
+          case 0x26: { // & repeat an earlier surface with a transform
+            var rm = new Float32Array(12);
+            for (var rk2 = 0; rk2 < 12; rk2++) rm[rk2] = dv.getFloat32(p + 17 + 4 * rk2, true);
+            repeats.push({ src: i32(p), key: i32(p + 8), m: rm, path: cur }); // copy surface src into placeholder key
+            p += 65; break;
+          }
+          case 0x40: if (d[p] === 0xff) { p += 1; p += 1 + d[p]; } else p += 1; break; // @ marker symbol
+          case 0x2b: p += 4; break; // + marker size
+          case 0x52: p = skipRendering(p); break; // R rendering options
           case 0x7e: // ~ colour by RGB
             var mask = d[p++]; var sh = 8;
             while ((d[p - 1] & 0x80) && sh < 32) { mask |= d[p++] << sh; sh += 8; }
@@ -131,12 +163,14 @@ var EASM = (function () {
                 if (o === 0x63) break;
                 else if (o === 0x01) { p += 2; p += 4 + i32(p); }
                 else if (o === 0x1c) { var kk = d[p]; p += 1 + 4 * kk * n; }
-                else { warnings.push('Unknown surface option ' + o.toString(16)); throw 'stop'; }
+                else { p--; break; } // no terminator: the next record starts here
               }
             }
             var t = key >= 0 ? tags[key] : null;
             var owner = (t && t.k === 'ph') ? t.path : cur;
-            segs.get(owner).shells.push({ pp: pp, n: n, fp: fp, fl: fl, strips: (f & 0x04) !== 0 });
+            var shObj = { pp: pp, n: n, fp: fp, fl: fl, strips: (f & 0x04) !== 0 };
+            segs.get(owner).shells.push(shObj);
+            if (key >= 0) shellByKey.set(key, shObj);
             shellCount++;
             break;
           }
@@ -149,6 +183,12 @@ var EASM = (function () {
       if (e !== 'stop') stopInfo = { op: -1, at: p, err: String(e && e.message || e) };
       else if (!stopInfo) stopInfo = { op: d[p - 1], at: p };
     }
+    repeats.forEach(function (r) {
+      var src = shellByKey.get(r.src); if (!src) return;
+      var t2 = tags[r.key], owner2 = (t2 && t2.k === 'ph') ? t2.path : r.path;
+      segs.get(owner2).shells.push({ pp: src.pp, n: src.n, fp: src.fp, fl: src.fl, strips: src.strips, xf: r.m });
+      shellCount++;
+    });
     // Recovery: if the structured read stopped before the end, scan the rest of the stream for surfaces.
     var scanned = 0;
     if (stopInfo && stopInfo.at < N) {
@@ -196,9 +236,8 @@ var EASM = (function () {
           if (o === 0x63) break;
           else if (o === 0x01) { e += 2; var L = dv.getInt32(e, true); if (L < 0 || e + 4 + L > N) return null; e += 4 + L; }
           else if (o === 0x1c) { var kk = d[e]; if (kk > 8) return null; e += 1 + 4 * kk * n; }
-          else return null;
+          else { e--; break; }
         }
-        if (d[e - 1] !== 0x63) return null;
       }
       for (var i = 0; i < 9; i++) { var v = dv.getFloat32(pp + 4 * i, true); if (!isFinite(v) || Math.abs(v) > 1e6) return null; }
       return { sh: { pp: pp, n: n, fp: fp, fl: fl, strips: (f & 0x04) !== 0 }, key: key, end: e };
@@ -217,6 +256,15 @@ var EASM = (function () {
     var dv = model.dv, d = model.data;
     var pos = new Float32Array(s.n * 3);
     for (var i = 0; i < s.n * 3; i++) pos[i] = dv.getFloat32(s.pp + 4 * i, true);
+    if (s.xf) {
+      var m = s.xf;
+      for (var v0 = 0; v0 < s.n * 3; v0 += 3) {
+        var x = pos[v0], y = pos[v0 + 1], z = pos[v0 + 2];
+        pos[v0] = x * m[0] + y * m[3] + z * m[6] + m[9];
+        pos[v0 + 1] = x * m[1] + y * m[4] + z * m[7] + m[10];
+        pos[v0 + 2] = x * m[2] + y * m[5] + z * m[8] + m[11];
+      }
+    }
     var bits = d[s.fp], bytes = bits >> 3, q = s.fp + 1, end = s.fp + s.fl;
     var rd = bytes === 1 ? function (x) { return d[x]; } : bytes === 2 ? function (x) { return dv.getUint16(x, true); } : function (x) { return dv.getInt32(x, true); };
     var tri = [];
