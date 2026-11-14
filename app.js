@@ -229,7 +229,7 @@ async function build(model,fileName){
   renderTree(rootNode); applyVisibility();
   ['btnFit','selView','selProj','btnEdges','btnMeasure','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   $('empty').style.display='none';
-  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres';
+  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 5';
   state.radius=1; setView('iso');
 }
 
@@ -626,8 +626,13 @@ view.addEventListener('drop',function(e){e.preventDefault(); view.classList.remo
 if('launchQueue' in window){
   window.launchQueue.setConsumer(async function(params){if(params&&params.files&&params.files.length)openFile(await params.files[0].getFile());});
 }
+if('serviceWorker' in navigator){
+  // When an updated viewer takes over, reload once so the new code is used straight away.
+  var hadController=!!navigator.serviceWorker.controller, reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',function(){if(hadController&&!reloaded&&!state.meshes.length){reloaded=true; location.reload();}});
+}
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
-  window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(e){console.warn('Offline support unavailable',e);});});
+  window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
 }
 $('btnTree').onclick=function(){var a=$('aside'),o=!a.classList.contains('open'); a.classList.toggle('open',o); this.setAttribute('aria-expanded',o);};
 window.__edv={state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
