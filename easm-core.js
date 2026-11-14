@@ -67,7 +67,7 @@ var EASM = (function () {
     seg('/');
     var stack = ['/'];
     var last = null;
-    var p = 0, shellCount = 0;
+    var p = 0, shellCount = 0, stopInfo = null;
     var u16 = function (q) { return dv.getUint16(q, true); };
     var i32 = function (q) { return dv.getInt32(q, true); };
     try {
@@ -141,20 +141,75 @@ var EASM = (function () {
             break;
           }
           default:
+            stopInfo = { op: c, at: st };
             throw 'stop';
         }
       }
     } catch (e) {
-      if (e !== 'stop') {
-        if (shellCount === 0) throw e;
-        warnings.push('Stopped reading early: ' + e.message);
+      if (e !== 'stop') stopInfo = { op: -1, at: p, err: String(e && e.message || e) };
+      else if (!stopInfo) stopInfo = { op: d[p - 1], at: p };
+    }
+    // Recovery: if the structured read stopped before the end, scan the rest of the stream for surfaces.
+    var scanned = 0;
+    if (stopInfo && stopInfo.at < N) {
+      var rootSeg = null;
+      segs.forEach(function (s, k) { if (!rootSeg && /\/3dmodel$/.test(k)) rootSeg = k; });
+      scanned = scanShells(d, dv, stopInfo.at, function (sh, key) {
+        var t = key >= 0 ? tags[key] : null;
+        var owner = (t && t.k === 'ph') ? t.path : (rootSeg || '/');
+        segs.get(owner).shells.push(sh);
+      });
+      shellCount += scanned;
+      if (shellCount === 0) {
+        throw new Error('No 3D surfaces could be read from this file (stopped at record 0x' + (stopInfo.op >= 0 ? stopInfo.op.toString(16) : '??') +
+          ', ' + Math.round(100 * stopInfo.at / N) + '% through' + (stopInfo.err ? ', ' + stopInfo.err : '') + '). Drawings (.edrw) aren’t supported.');
       }
+      if (scanned) warnings.push('Part of this file used records this viewer doesn’t know, so some surfaces may be out of place.');
     }
     var root = null;
     segs.forEach(function (s, k) { if (!root && /\/3dmodel$/.test(k)) root = k; });
     var title = '';
     segs.forEach(function (s) { if (!title) { var mm = /refname=([^,]*)/.exec(s.opts); if (mm) title = mm[1]; } });
-    return { data: d, dv: dv, segs: segs, root: root || '/', title: title, warnings: warnings, shellCount: shellCount };
+    return { data: d, dv: dv, segs: segs, root: root || '/', title: title, warnings: warnings, shellCount: shellCount, stopInfo: stopInfo, scanned: scanned };
+  }
+
+  // Find uncompressed shell records by their structure. Accepts the eDrawings layout (S 00 flags …) and plain HSF (S flags …).
+  function scanShells(d, dv, from, add) {
+    var N = d.length, p = from, found = 0;
+    function tryAt(q) {
+      var f = d[q];
+      if (f & 0xC1) return null;                       // not expanded, not compressed
+      var hk = (f & 0x10) ? 0 : 4;                     // first-pass shells carry no key
+      var key = hk ? dv.getInt32(q + 1, true) : -1, lod = d[q + 1 + hk], n = dv.getInt32(q + 2 + hk, true);
+      if (key < -1 || key > 50000000 || lod > 8 || n < 3 || n > 5000000) return null;
+      var pp = q + 6 + hk, fq = pp + 12 * n;
+      if (fq + 6 > N || d[fq] !== 1) return null;
+      var fl = dv.getInt32(fq + 1, true), fp = fq + 5, bits = d[fp];
+      if (fl < 2 || fp + fl > N || (bits !== 8 && bits !== 16 && bits !== 32)) return null;
+      var first = bits === 8 ? d[fp + 1] : bits === 16 ? dv.getUint16(fp + 1, true) : dv.getInt32(fp + 1, true);
+      if (first < 3 || first > 3 * n + 3) return null;
+      var e = fp + fl;
+      if (f & 0x08) {
+        for (var guard = 0; guard < 8; guard++) {
+          if (e >= N) return null;
+          var o = d[e++];
+          if (o === 0x63) break;
+          else if (o === 0x01) { e += 2; var L = dv.getInt32(e, true); if (L < 0 || e + 4 + L > N) return null; e += 4 + L; }
+          else if (o === 0x1c) { var kk = d[e]; if (kk > 8) return null; e += 1 + 4 * kk * n; }
+          else return null;
+        }
+        if (d[e - 1] !== 0x63) return null;
+      }
+      for (var i = 0; i < 9; i++) { var v = dv.getFloat32(pp + 4 * i, true); if (!isFinite(v) || Math.abs(v) > 1e6) return null; }
+      return { sh: { pp: pp, n: n, fp: fp, fl: fl, strips: (f & 0x04) !== 0 }, key: key, end: e };
+    }
+    while (p < N - 16) {
+      var s = d.indexOf(0x53, p);
+      if (s < 0) break;
+      var r = (d[s + 1] === 0x00 ? tryAt(s + 2) : null) || tryAt(s + 1);
+      if (r) { add(r.sh, r.key); found++; p = r.end; } else p = s + 1;
+    }
+    return found;
   }
 
   // Decode one shell into local positions and triangle indices.
@@ -207,6 +262,6 @@ var EASM = (function () {
     return mm ? mm[1] : null;
   }
 
-  return { unpack: unpack, inflateModel: inflateModel, parse: parse, decodeShell: decodeShell, boundaryEdges: boundaryEdges, nameOf: nameOf };
+  return { scanShells: scanShells, unpack: unpack, inflateModel: inflateModel, parse: parse, decodeShell: decodeShell, boundaryEdges: boundaryEdges, nameOf: nameOf };
 })();
 if (typeof module !== 'undefined') module.exports = EASM;
