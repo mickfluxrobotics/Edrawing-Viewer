@@ -1,6 +1,5 @@
-eDrawings Viewer - installable web app
+eDrawings Viewer - installable web app (version 2)
 
-All files sit in one folder (no subfolders) so they can be uploaded with
-GitHub's "choose your files" picker. Upload all 12 files, commit, then turn
-on GitHub Pages (Settings > Pages > Deploy from a branch > main > / (root)).
-Open the Pages address in Chrome and install it from the address bar.
+All files sit in one folder so GitHub's "choose your files" picker can upload them.
+Upload all files to the repository root and commit; GitHub Pages republishes in a minute or two.
+Opens .easm assemblies and .eprt parts. Orthographic or perspective view, SolidWorks-style mouse, measure corners, edges and faces.

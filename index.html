@@ -95,6 +95,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .warn.on{display:block}
 .stats{position:absolute;right:12px;bottom:12px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
 .only-narrow{display:none}
+.help{position:absolute;right:12px;top:12px;z-index:4;width:min(380px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.help h2{font-size:14px;margin:0 0 8px;font-weight:600}
+.help dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0 0 10px;font-size:13px}
+.help dt{font-weight:500}.help dd{margin:0;color:var(--muted)}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer}
+.chk input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+.panel .sub{color:var(--muted);font-size:12px;margin:-2px 0 6px}
+.dot.ctr{background:#fff;border-color:var(--measure);width:10px;height:10px;margin:-5px 0 0 -5px}
 @media (max-width:760px){
   main{grid-template-columns:1fr}
   aside{position:absolute;z-index:5;left:0;top:0;bottom:0;width:min(86vw,340px);transform:translateX(-102%);transition:transform .18s;box-shadow:0 8px 30px rgba(0,0,0,.25)}
@@ -109,20 +117,22 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand">eDrawings Viewer<small id="title">Opens .easm files on this device</small></div>
+    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <button class="btn primary" id="btnOpen">Open file</button>
       <button class="btn" id="btnFit" disabled>Fit</button>
       <select class="btn" id="selView" aria-label="Standard view" disabled>
         <option value="iso">Isometric</option><option value="front">Front</option><option value="back">Back</option>
-        <option value="top">Top</option><option value="right">Right</option><option value="left">Left</option>
+        <option value="top">Top</option><option value="bottom">Bottom</option><option value="right">Right</option><option value="left">Left</option>
       </select>
+      <select class="btn" id="selProj" aria-label="Projection" disabled><option value="ortho">Orthographic</option><option value="persp">Perspective</option></select>
       <button class="btn" id="btnEdges" aria-pressed="true" disabled>Edges</button>
-      <button class="btn" id="btnMeasure" aria-pressed="false" disabled>Measure</button>
+      <button class="btn" id="btnMeasure" aria-pressed="false" title="Measure (M)" disabled>Measure</button>
       <select class="btn" id="selUnits" aria-label="Units">
         <option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="in">in</option>
       </select>
+      <button class="btn" id="btnHelp" aria-expanded="false" aria-controls="help">Controls</button>
     </div>
     <input type="file" id="file" accept=".easm,.eprt,.EASM,.EPRT" hidden>
   </header>
@@ -141,8 +151,8 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     <section class="view" id="view">
       <div class="empty" id="empty">
         <div class="empty-card">
-          <h1>Open an eDrawings assembly</h1>
-          <p>Pick an .easm file to view it in 3D, hide parts from the tree and take measurements. The file is read in this browser and never uploaded.</p>
+          <h1>Open an eDrawings file</h1>
+          <p>Pick an .easm assembly or .eprt part to view it in 3D, hide parts from the tree and take measurements. The file is read on this device and never uploaded.</p>
           <button class="btn primary" id="btnOpen2">Open file</button>
           <div class="drop">Or drop the file here.</div>
         </div>
@@ -152,16 +162,33 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <div class="panel" id="spanel" aria-live="polite"></div>
       <div class="warn" id="warn" role="status"></div>
       <div class="stats" id="stats"></div>
+      <div class="help" id="help" hidden>
+        <h2>Controls</h2>
+        <dl>
+          <dt>Rotate</dt><dd>Middle-drag or left-drag</dd>
+          <dt>Pan</dt><dd>Ctrl + drag, or right-drag</dd>
+          <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + drag also zooms.</dd>
+          <dt>Fit</dt><dd>F</dd>
+          <dt>Projection</dt><dd>Orthographic (SolidWorks default) or Perspective, from the menu in the toolbar</dd>
+          <dt>Measure</dt><dd>M, then click corners, edges or faces. Two picks give the distance or angle between them.</dd>
+          <dt>Clear</dt><dd>Esc clears every selection. Press it again to leave Measure.</dd>
+          <dt>Views</dt><dd>Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app)</dd>
+        </dl>
+        <label class="chk"><input type="checkbox" id="revZoom"> Reverse scroll zoom</label>
+      </div>
       <div class="busy" id="busy" role="status" aria-live="polite">
         <div class="busy-card"><img id="preview" alt="Model preview"><div><div id="busyText">Opening…</div><div class="bar"><i id="busyBar"></i></div></div></div>
       </div>
     </section>
   </main>
 </div>
-<script src="three.min.js"></script>
-<script src="OrbitControls.js"></script>
-<script src="fflate.js"></script>
-<script src="easm-core.js"></script>
-<script src="app.js"></script>
+<script src="three.min.js?v=2"></script>
+<script src="OrbitControls.js?v=2"></script>
+<script src="LineSegmentsGeometry.js?v=2"></script>
+<script src="LineMaterial.js?v=2"></script>
+<script src="LineSegments2.js?v=2"></script>
+<script src="fflate.js?v=2"></script>
+<script src="easm-core.js?v=2"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

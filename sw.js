@@ -1,12 +1,12 @@
-// Offline cache for the eDrawings Viewer app shell.
-const CACHE='edrawings-viewer-v1';
-const FILES=['./','index.html','app.js','easm-core.js','manifest.webmanifest','three.min.js','OrbitControls.js','fflate.js','icon-192.png','icon-512.png','icon-maskable-512.png'];
+// eDrawings Viewer: network first (so updates arrive), cache fallback (so it works offline).
+const CACHE='edrawings-viewer-v2';
+const FILES=["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "three.min.js", "OrbitControls.js", "LineSegmentsGeometry.js", "LineMaterial.js", "LineSegments2.js", "fflate.js", "easm-core.js", "app.js"];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(FILES)).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
 self.addEventListener('fetch',e=>{
-  if(e.request.method!=='GET')return;
-  e.respondWith(caches.match(e.request,{ignoreSearch:true}).then(hit=>hit||fetch(e.request).then(res=>{
-    if(res.ok&&new URL(e.request.url).origin===location.origin){const copy=res.clone(); caches.open(CACHE).then(c=>c.put(e.request,copy));}
+  if(e.request.method!=='GET'||new URL(e.request.url).origin!==location.origin)return;
+  e.respondWith(fetch(e.request).then(res=>{
+    if(res.ok){const copy=res.clone(); caches.open(CACHE).then(c=>c.put(e.request,copy));}
     return res;
-  })));
+  }).catch(()=>caches.match(e.request,{ignoreSearch:true}).then(hit=>hit||caches.match('index.html'))));
 });
