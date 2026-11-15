@@ -95,6 +95,19 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .warn.on{display:block}
 .stats{position:absolute;right:12px;bottom:12px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
 .only-narrow{display:none}
+.props{position:absolute;left:12px;top:12px;z-index:3;width:min(300px,calc(100% - 24px));max-height:calc(100% - 150px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:none;font-variant-numeric:tabular-nums}
+.props.on{display:block}
+.props h2{font-size:13px;margin:0 0 2px;font-weight:600;overflow-wrap:anywhere}
+.props h3{font-size:12px;margin:10px 0 4px;font-weight:600;color:var(--muted)}
+.props dl{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:0}
+.props dt{color:var(--muted)}.props dd{margin:0;text-align:right}
+.props .sub{color:var(--muted);font-size:12px;margin:0 0 6px}
+.props .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
+.props .big{font-size:20px;font-weight:600}
+.props select{width:100%}
+.band{position:absolute;border:1.5px solid var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border-radius:2px}
+.band.crossing{border-style:dashed}
+.com{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;border:2px solid #111;box-shadow:0 0 0 2px #fff;background:conic-gradient(#111 0 25%,#fff 0 50%,#111 0 75%,#fff 0)}
 .help{position:absolute;right:12px;top:12px;z-index:4;width:min(380px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
 .help h2{font-size:14px;margin:0 0 8px;font-weight:600}
 .help dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0 0 10px;font-size:13px}
@@ -117,7 +130,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 5)</small></div>
+    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 6)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <button class="btn primary" id="btnOpen">Open file</button>
@@ -129,6 +142,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <select class="btn" id="selProj" aria-label="Projection" disabled><option value="ortho">Orthographic</option><option value="persp">Perspective</option></select>
       <button class="btn" id="btnEdges" aria-pressed="true" disabled>Edges</button>
       <button class="btn" id="btnMeasure" aria-pressed="false" title="Measure (M)" disabled>Measure</button>
+      <button class="btn" id="btnMass" aria-pressed="false" title="Mass properties" disabled>Mass</button>
       <select class="btn" id="selUnits" aria-label="Units">
         <option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="in">in</option>
       </select>
@@ -160,17 +174,21 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <div class="overlay" id="overlay"></div>
       <div class="panel" id="mpanel" aria-live="polite"></div>
       <div class="panel" id="spanel" aria-live="polite"></div>
+      <div class="props" id="ppanel" aria-live="polite"></div>
       <div class="warn" id="warn" role="status"></div>
       <div class="stats" id="stats"></div>
       <div class="help" id="help" hidden>
         <h2>Controls</h2>
         <dl>
-          <dt>Rotate</dt><dd>Middle-drag or left-drag</dd>
+          <dt>Select</dt><dd>Click a part. Shift + click adds or removes parts. Drag a box left to right to select parts fully inside it, or right to left to select everything it touches. Shift + drag adds to the selection.</dd>
+          <dt>Hide</dt><dd>H hides the selected parts. Show all brings them back.</dd>
+          <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad</dd>
           <dt>Pan</dt><dd>Ctrl + drag, or right-drag</dd>
-          <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + drag also zooms.</dd>
+          <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + middle-drag also zooms.</dd>
           <dt>Fit</dt><dd>F</dd>
           <dt>Projection</dt><dd>Orthographic (SolidWorks default) or Perspective, from the menu in the toolbar</dd>
           <dt>Measure</dt><dd>M, then click corners, edges or faces. Two picks give the distance or angle between them.</dd>
+          <dt>Mass</dt><dd>Shows the mass properties saved in the file for the whole model, and volume with an estimated mass for selected parts.</dd>
           <dt>Clear</dt><dd>Esc clears every selection. Press it again to leave Measure.</dd>
           <dt>Views</dt><dd>Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app)</dd>
         </dl>
@@ -182,13 +200,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     </section>
   </main>
 </div>
-<script src="three.min.js?v=5"></script>
-<script src="OrbitControls.js?v=5"></script>
-<script src="LineSegmentsGeometry.js?v=5"></script>
-<script src="LineMaterial.js?v=5"></script>
-<script src="LineSegments2.js?v=5"></script>
-<script src="fflate.js?v=5"></script>
-<script src="easm-core.js?v=5"></script>
-<script src="app.js?v=5"></script>
+<script src="three.min.js?v=6"></script>
+<script src="OrbitControls.js?v=6"></script>
+<script src="LineSegmentsGeometry.js?v=6"></script>
+<script src="LineMaterial.js?v=6"></script>
+<script src="LineSegments2.js?v=6"></script>
+<script src="fflate.js?v=6"></script>
+<script src="easm-core.js?v=6"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

@@ -210,7 +210,18 @@ var EASM = (function () {
     segs.forEach(function (s, k) { if (!root && /\/3dmodel$/.test(k)) root = k; });
     var title = '';
     segs.forEach(function (s) { if (!title) { var mm = /refname=([^,]*)/.exec(s.opts); if (mm) title = mm[1]; } });
-    return { data: d, dv: dv, segs: segs, root: root || '/', title: title, warnings: warnings, shellCount: shellCount, stopInfo: stopInfo, scanned: scanned };
+    // Mass properties SolidWorks saved for the top-level model (SI units), if any.
+    var mass = null;
+    segs.forEach(function (s, k) {
+      if (mass || !/\/massprops$/.test(k) || !/(^|,)mass=/.test(s.opts)) return;
+      mass = {};
+      s.opts.split(',').forEach(function (kv) {
+        var i = kv.indexOf('='); if (i < 1) return;
+        var v = parseFloat(kv.slice(i + 1)); if (isFinite(v)) mass[kv.slice(0, i)] = v;
+      });
+      if (!(mass.mass > 0)) mass = null;
+    });
+    return { data: d, dv: dv, segs: segs, root: root || '/', title: title, warnings: warnings, shellCount: shellCount, stopInfo: stopInfo, scanned: scanned, massProps: mass };
   }
 
   // Find uncompressed shell records by their structure. Accepts the eDrawings layout (S 00 flags …) and plain HSF (S flags …).

@@ -22,14 +22,18 @@ scene.add(new THREE.HemisphereLight(0xffffff,0x8a939a,0.25));
 var controls=new THREE.OrbitControls(camera,renderer.domElement);
 controls.enableDamping=true; controls.dampingFactor=0.14; controls.screenSpacePanning=true;
 controls.rotateSpeed=0.8; controls.enableZoom=true; controls.zoomSpeed=1.2;
-controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.ROTATE,RIGHT:THREE.MOUSE.PAN};
-// Middle-drag rotates, Ctrl+drag pans, Shift+drag zooms (left or middle button).
+controls.mouseButtons={LEFT:-1,MIDDLE:THREE.MOUSE.ROTATE,RIGHT:THREE.MOUSE.PAN};
+// Left button selects (click or drag a box). Middle-drag rotates, Ctrl+drag pans, Shift+middle-drag zooms.
+// Alt+left-drag also rotates, for touchpads with no middle button.
 view.addEventListener('pointerdown',function(e){
   if(e.pointerType!=='mouse')return;
-  var zoom=e.shiftKey&&!e.ctrlKey, pan=e.ctrlKey||e.metaKey;
-  controls.mouseButtons.LEFT=zoom?THREE.MOUSE.DOLLY:THREE.MOUSE.ROTATE;
-  controls.mouseButtons.MIDDLE=pan?THREE.MOUSE.PAN:(zoom?THREE.MOUSE.DOLLY:THREE.MOUSE.ROTATE);
+  var pan=e.ctrlKey||e.metaKey;
+  // OrbitControls turns a rotate drag into a pan when Ctrl/Cmd is held, so ROTATE covers both.
+  controls.mouseButtons.LEFT=(e.altKey||pan)?THREE.MOUSE.ROTATE:-1;
+  controls.mouseButtons.MIDDLE=(e.shiftKey&&!pan)?THREE.MOUSE.DOLLY:THREE.MOUSE.ROTATE;
 },true);
+var hud=document.createElement('div'); hud.className='overlay'; view.insertBefore(hud,$('mpanel'));
+var comEl=document.createElement('div'); comEl.className='com'; comEl.style.display='none'; comEl.title='Centre of mass'; hud.appendChild(comEl);
 renderer.domElement.addEventListener('contextmenu',function(e){e.preventDefault();});
 var reverseZoom=false;
 try{reverseZoom=localStorage.getItem('edv.reverseZoom')==='1';}catch(e){}
@@ -91,7 +95,7 @@ function refreshThemeColors(){
 if(window.matchMedia){var mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refreshThemeColors):mq.addListener(refreshThemeColors));}
 
 var needsRender=true;
-var state={model:null,root:null,meshes:[],edgesOn:true,measuring:false,ents:[],selected:null,radius:1,units:'mm',mObjs:[]};
+var state={model:null,root:null,meshes:[],edgesOn:true,measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null};
 var matCache=new Map();
 function matFor(rgb){
   var k=rgb.join(','), m=matCache.get(k);
@@ -227,10 +231,10 @@ async function build(model,fileName){
   }
   modelRoot.updateMatrixWorld(true);
   renderTree(rootNode); applyVisibility();
-  ['btnFit','selView','selProj','btnEdges','btnMeasure','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
+  ['btnFit','selView','selProj','btnEdges','btnMeasure','btnMass','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   $('empty').style.display='none';
-  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 5';
-  state.radius=1; setView('iso');
+  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 6';
+  state.radius=1; setView('iso'); updateMass();
 }
 
 // ---------- visibility & tree ----------
@@ -242,6 +246,7 @@ function applyVisibility(){
     if(n.cb)n.cb.checked=n.visible;
     for(i=0;i<n.children.length;i++)rec(n.children[i],v);
   })(state.root,true);
+  if(state.massOn)updateMass();
   needsRender=true;
 }
 var caretSvg='<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M3 1.5 7 5 3 8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -260,7 +265,7 @@ function renderTree(root){
     n.row=row; n.cb=cb; n.kidsEl=kids; n.caret=car; n.wrap=wrap;
     car.onclick=function(){var o=!kids.classList.contains('open'); kids.classList.toggle('open',o); car.setAttribute('aria-expanded',o?'true':'false');};
     cb.onchange=function(){n.visible=cb.checked; applyVisibility();};
-    nm.onclick=function(){select(n); focusInfo(n);};
+    nm.onclick=function(e){if(e.shiftKey||e.ctrlKey||e.metaKey)toggleSelect(n); else select(n);};
     for(var i=0;i<n.children.length;i++)make(n.children[i],kids);
     parentEl.appendChild(wrap);
   })(root,tree);
@@ -279,35 +284,174 @@ $('search').addEventListener('input',function(){
   })(state.root);
 });
 $('btnShowAll').onclick=function(){forEachNode(state.root,function(n){n.visible=true;}); applyVisibility();};
-$('btnHideSel').onclick=function(){if(state.selected){state.selected.visible=false; applyVisibility(); select(null);}};
+$('btnHideSel').onclick=function(){
+  if(!state.sel.length)return;
+  state.sel.forEach(function(n){n.visible=false;});
+  var none=[]; setSelection(none); applyVisibility();
+};
 $('btnIsolate').onclick=function(){
-  var s=state.selected; if(!s)return;
+  var s=state.sel.slice(); if(!s.length)return;
   forEachNode(state.root,function(n){n.visible=false;});
-  var p=s; while(p){p.visible=true; p=p.parent;}
-  forEachNode(s,function(n){n.visible=true;});
-  applyVisibility(); fit(meshesUnder(s));
+  s.forEach(function(x){var p=x; while(p){p.visible=true; p=p.parent;} forEachNode(x,function(n){n.visible=true;});});
+  applyVisibility(); fit(selMeshes());
 };
 
-// ---------- part selection ----------
-function select(n){
-  if(state.selected){meshesUnder(state.selected).forEach(function(m){m.material=m.userData.base;}); if(state.selected.row)state.selected.row.classList.remove('sel');}
-  state.selected=n;
-  $('btnHideSel').disabled=!n; $('btnIsolate').disabled=!n;
-  if(n){meshesUnder(n).forEach(function(m){m.material=selMat;}); if(n.row){n.row.classList.add('sel'); expandTo(n); n.row.scrollIntoView({block:'nearest'});}}
-  else $('spanel').classList.remove('on');
-  needsRender=true;
+// ---------- part selection (one or many) ----------
+function selMeshes(){
+  var set=new Set();
+  state.sel.forEach(function(n){meshesUnder(n).forEach(function(m){set.add(m);});});
+  return Array.from(set);
+}
+function setSelection(nodes,opts){
+  selMeshes().forEach(function(m){m.material=m.userData.base;});
+  state.sel.forEach(function(n){if(n.row)n.row.classList.remove('sel');});
+  state.sel=nodes.filter(function(n,i){return n&&nodes.indexOf(n)===i;});
+  selMeshes().forEach(function(m){m.material=selMat;});
+  state.sel.forEach(function(n){if(n.row)n.row.classList.add('sel');});
+  if(state.sel.length===1&&state.sel[0].row&&!(opts&&opts.noScroll)){expandTo(state.sel[0]); state.sel[0].row.scrollIntoView({block:'nearest'});}
+  $('btnHideSel').disabled=!state.sel.length; $('btnIsolate').disabled=!state.sel.length;
+  showSelInfo(); updateMass(); needsRender=true;
+}
+function select(n){setSelection(n?[n]:[]);}
+function toggleSelect(n){
+  var i=state.sel.indexOf(n);
+  setSelection(i>=0?state.sel.filter(function(x){return x!==n;}):state.sel.concat([n]),{noScroll:i>=0});
 }
 function pathOf(n){var a=[],p=n; while(p&&p.parent){a.unshift(p.name); p=p.parent;} return a;}
-function focusInfo(n){
-  var sp=$('spanel'); if(state.measuring||!n){sp.classList.remove('on');return;}
-  var path=pathOf(n); sp.innerHTML='';
-  var h=document.createElement('h2'); h.textContent=n.name; sp.appendChild(h);
-  if(path.length>1){var pp=document.createElement('p'); pp.className='hint'; pp.textContent=path.slice(0,-1).join(' › '); sp.appendChild(pp);}
+function showSelInfo(){
+  var sp=$('spanel'), s=state.sel;
+  if(state.measuring||!s.length){sp.classList.remove('on');return;}
+  sp.innerHTML='';
+  var h=document.createElement('h2'); h.textContent=s.length===1?s[0].name:s.length+' components selected'; sp.appendChild(h);
+  var pp=document.createElement('p'); pp.className='hint';
+  if(s.length===1){var path=pathOf(s[0]); pp.textContent=path.length>1?path.slice(0,-1).join(' › '):'';}
+  else pp.textContent=s.slice(0,3).map(function(n){return n.name;}).join(', ')+(s.length>3?' and '+(s.length-3)+' more':'');
+  if(pp.textContent)sp.appendChild(pp);
   var acts=document.createElement('div'); acts.className='acts';
-  [['Hide',function(){$('btnHideSel').click();}],['Isolate',function(){$('btnIsolate').click();}],['Zoom to',function(){fit(meshesUnder(n));}]].forEach(function(a){
+  [['Hide',function(){$('btnHideSel').click();}],['Isolate',function(){$('btnIsolate').click();}],['Zoom to',function(){fit(selMeshes());}]].forEach(function(a){
     var b=document.createElement('button'); b.className='btn'; b.textContent=a[0]; b.onclick=a[1]; acts.appendChild(b);});
   sp.appendChild(acts); sp.classList.add('on');
 }
+// Drag a box with the left button. Left to right: parts fully inside. Right to left: anything the box touches.
+function boxSelect(x0,y0,x1,y1,crossing){
+  var rect=rectOf(), L=Math.min(x0,x1), R=Math.max(x0,x1), T=Math.min(y0,y1), B=Math.max(y0,y1);
+  var v=new THREE.Vector3(), per=new Map();
+  state.meshes.forEach(function(m){
+    if(!m.visible)return;
+    var node=m.userData.node, st=per.get(node); if(!st){st={all:true,any:false}; per.set(node,st);}
+    var bb=m.geometry.boundingBox, minx=1e9, maxx=-1e9, miny=1e9, maxy=-1e9, behind=false;
+    for(var i=0;i<8;i++){
+      v.set(i&1?bb.max.x:bb.min.x, i&2?bb.max.y:bb.min.y, i&4?bb.max.z:bb.min.z).applyMatrix4(m.matrixWorld);
+      var sc=toScreen(v,rect); if(sc.z>1)behind=true;
+      if(sc.x<minx)minx=sc.x; if(sc.x>maxx)maxx=sc.x; if(sc.y<miny)miny=sc.y; if(sc.y>maxy)maxy=sc.y;
+    }
+    if(maxx<L||minx>R||maxy<T||miny>B){st.all=false; return;}
+    if(!behind&&minx>=L&&maxx<=R&&miny>=T&&maxy<=B){st.any=true; return;}
+    var pa=m.geometry.getAttribute('position'), n=pa.count, step=Math.max(1,Math.floor(n/400)), ins=0, tot=0;
+    for(var k=0;k<n;k+=step){
+      v.fromBufferAttribute(pa,k).applyMatrix4(m.matrixWorld);
+      var s2=toScreen(v,rect); tot++;
+      if(s2.z<=1&&s2.x>=L&&s2.x<=R&&s2.y>=T&&s2.y<=B)ins++;
+    }
+    if(ins>0)st.any=true;
+    if(ins<tot)st.all=false;
+  });
+  if(crossing){
+    var mx=(L+R)/2, my=(T+B)/2;
+    [[mx,my],[L,T],[R,T],[L,B],[R,B],[mx,T],[mx,B],[L,my],[R,my]].forEach(function(p){
+      var h=rayHit(p[0],p[1]); if(h){var st=per.get(h.object.userData.node); if(st)st.any=true;}
+    });
+  }
+  var out=[];
+  per.forEach(function(st,node){if(crossing?st.any:(st.all&&st.any))out.push(node);});
+  return out;
+}
+
+// ---------- mass properties ----------
+var DENSITIES=[['steel','Steel',7850],['stainless','Stainless steel',8000],['aluminium','Aluminium',2700],['brass','Brass',8500],
+  ['abs','ABS plastic',1050],['nylon','Nylon',1150],['acetal','Acetal (POM)',1410],['hdpe','HDPE',950],['pc','Polycarbonate',1200]];
+var densityKey=''; try{densityKey=localStorage.getItem('edv.density')||'';}catch(e){}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function num(v,dp){return v.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp});}
+function fmtMass(kg){
+  if(state.units==='in')return num(kg*2.2046226,2)+' lb';
+  return kg>=1?num(kg,2)+' kg':num(kg*1000,1)+' g';
+}
+function fmtVol(m3){
+  if(state.units==='in')return num(m3*61023.7441,2)+' in³';
+  if(state.units==='m')return num(m3,6)+' m³';
+  var cm3=m3*1e6; return cm3>=1e5?num(m3,4)+' m³':num(cm3,2)+' cm³';
+}
+function fmtArea(m2){
+  if(state.units==='in')return num(m2*1550.0031,2)+' in²';
+  if(state.units==='m')return num(m2,4)+' m²';
+  var cm2=m2*1e4; return cm2>=1e5?num(m2,3)+' m²':num(cm2,2)+' cm²';
+}
+function fmtInertia(v){return state.units==='in'?num(v*3417.1717,1)+' lb·in²':num(v,2)+' kg·m²';}
+// Volume and surface area of one body, from its triangles (signed-volume sum; assumes a closed solid).
+function geoProps(g){
+  if(g.props)return g.props;
+  var p=g.geo.getAttribute('position').array, ix=g.geo.getIndex().array, vol=0, area=0;
+  for(var t=0;t<ix.length;t+=3){
+    var a=ix[t]*3,b=ix[t+1]*3,c=ix[t+2]*3;
+    var ax=p[a],ay=p[a+1],az=p[a+2],bx=p[b],by=p[b+1],bz=p[b+2],cx=p[c],cy=p[c+1],cz=p[c+2];
+    vol+=(ax*(by*cz-bz*cy)-ay*(bx*cz-bz*cx)+az*(bx*cy-by*cx))/6;
+    var ux=bx-ax,uy=by-ay,uz=bz-az,wx=cx-ax,wy=cy-ay,wz=cz-az;
+    area+=0.5*Math.hypot(uy*wz-uz*wy,uz*wx-ux*wz,ux*wy-uy*wx);
+  }
+  g.props={v:Math.abs(vol),a:area};
+  return g.props;
+}
+function geometryTotals(meshes){
+  var vol=0, area=0, verts=0, box=new THREE.Box3(), v=new THREE.Vector3();
+  meshes.forEach(function(m){verts+=m.geometry.getAttribute('position').count;});
+  var exact=verts<=1500000;
+  meshes.forEach(function(m){
+    var pr=geoProps(m.userData.g), det=Math.abs(m.matrixWorld.determinant());
+    vol+=pr.v*det; area+=pr.a*Math.pow(det,2/3);
+    if(exact){var pa=m.geometry.getAttribute('position'); for(var i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(m.matrixWorld); box.expandByPoint(v);}}
+    else box.expandByObject(m);
+  });
+  return {vol:vol,area:area,size:box.isEmpty()?null:box.getSize(new THREE.Vector3()),exact:exact,count:meshes.length};
+}
+function row(k,v){return '<dt>'+k+'</dt><dd>'+v+'</dd>';}
+function updateMass(){
+  var pp=$('ppanel');
+  if(!state.massOn||!state.root||!state.model){pp.classList.remove('on'); state.comAt=null; comEl.style.display='none'; return;}
+  var s=state.sel, whole=!s.length||(s.length===1&&s[0]===state.root), mp=state.model.massProps, html='';
+  state.comAt=null;
+  if(whole){
+    html+='<h2>'+esc(state.root.name)+'</h2>';
+    if(mp){
+      html+='<p class="sub">Saved in the file by SolidWorks</p><dl>'+row('Mass',fmtMass(mp.mass))+row('Volume',fmtVol(mp.volume))+row('Surface area',fmtArea(mp.area))+'</dl>';
+      if(isFinite(mp.grav_center_x)){
+        html+='<h3>Centre of mass</h3><dl>'+row('X',fmt(mp.grav_center_x))+row('Y',fmt(mp.grav_center_y))+row('Z',fmt(mp.grav_center_z))+'</dl>';
+        state.comAt=new THREE.Vector3(mp.grav_center_x,mp.grav_center_y,mp.grav_center_z);
+      }
+      if(isFinite(mp.px))html+='<h3>Principal moments of inertia</h3><dl>'+row('Px',fmtInertia(mp.px))+row('Py',fmtInertia(mp.py))+row('Pz',fmtInertia(mp.pz))+'</dl>';
+      html+='<p class="hint">The file only stores mass properties for the whole model. Select components to see their volume and an estimated mass.</p>';
+    }else html+='<p class="hint">This file has no saved mass properties, so these figures are worked out from the visible geometry.</p>';
+  }
+  if(!whole||!mp){
+    var meshes=whole?state.meshes.filter(function(m){return m.visible;}):selMeshes();
+    var vis=meshes.filter(function(m){return m.visible;}); if(vis.length)meshes=vis;
+    var g=geometryTotals(meshes);
+    if(!whole)html+='<h2>'+esc(s.length===1?s[0].name:s.length+' components selected')+'</h2>';
+    html+='<p class="sub">Estimated from the geometry</p><dl>'+row('Volume',fmtVol(g.vol))+row('Surface area',fmtArea(g.area));
+    if(g.size)html+=row('Size X',fmt(g.size.x))+row('Size Y',fmt(g.size.y))+row('Size Z',fmt(g.size.z));
+    html+='</dl>';
+    var dens=0, opts='<option value="">Choose a material</option>';
+    DENSITIES.forEach(function(d){opts+='<option value="'+d[0]+'"'+(densityKey===d[0]?' selected':'')+'>'+d[1]+' ('+d[2].toLocaleString()+' kg/m³)</option>'; if(densityKey===d[0])dens=d[2];});
+    if(mp&&mp.volume>0){var avg=mp.mass/mp.volume; opts+='<option value="avg"'+(densityKey==='avg'?' selected':'')+'>Model average ('+Math.round(avg).toLocaleString()+' kg/m³)</option>'; if(densityKey==='avg')dens=avg;}
+    html+='<h3>Estimated mass</h3><select class="btn" id="selDensity" aria-label="Material for the mass estimate">'+opts+'</select>';
+    html+='<div class="big" style="margin-top:6px">'+(dens?fmtMass(g.vol*dens):'—')+'</div>';
+    html+='<p class="hint">Volume × material density. '+(g.exact?'':'Size is approximate for a selection this large. ')+'Bodies that aren’t closed solids, such as surfaces, give unreliable volumes.</p>';
+  }
+  pp.innerHTML=html; pp.classList.add('on');
+  var sd=$('selDensity'); if(sd)sd.onchange=function(){densityKey=this.value; try{localStorage.setItem('edv.density',densityKey);}catch(e){} updateMass();};
+  comEl.style.display=state.comAt?'':'none'; needsRender=true;
+}
+$('btnMass').onclick=function(){state.massOn=!state.massOn; this.setAttribute('aria-pressed',state.massOn); updateMass();};
 
 // ---------- camera ----------
 function boxOf(list){
@@ -580,30 +724,57 @@ function updatePanel(r){
   mp.innerHTML=html; $('mClear').onclick=clearMeasure;
 }
 function updateOverlay(){
-  if(!state.marks||!state.measuring)return;
   var rect=rectOf();
+  if(state.comAt){var cs=toScreen(state.comAt,rect); comEl.style.left=(cs.x-rect.left)+'px'; comEl.style.top=(cs.y-rect.top)+'px'; comEl.style.display=cs.z>1?'none':'';}
+  if(!state.marks||!state.measuring)return;
   state.marks.forEach(function(m){var s=toScreen(m.p,rect); m.el.style.left=(s.x-rect.left)+'px'; m.el.style.top=(s.y-rect.top)+'px'; m.el.style.display=s.z>1?'none':'';});
   if(state.labelEl&&state.labelAt){var s=toScreen(state.labelAt,rect); state.labelEl.style.left=(s.x-rect.left)+'px'; state.labelEl.style.top=(s.y-rect.top-18)+'px'; state.labelEl.style.display=s.z>1?'none':'';}
 }
-$('selUnits').onchange=function(){state.units=this.value; if(state.ents.length)redrawMeasure(); else updatePanel();};
+$('selUnits').onchange=function(){state.units=this.value; if(state.ents.length)redrawMeasure(); else updatePanel(); updateMass();};
 
 // ---------- clicks & keys ----------
-var down=null;
-renderer.domElement.addEventListener('pointerdown',function(e){down={x:e.clientX,y:e.clientY,t:performance.now(),b:e.button};});
+var down=null, band=null;
+function endBand(){if(band){band.remove(); band=null;}}
+renderer.domElement.addEventListener('pointerdown',function(e){
+  down={x:e.clientX,y:e.clientY,t:performance.now(),b:e.button,box:false,id:e.pointerId,
+    canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&state.meshes.length>0};
+  if(down.canBox){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
+});
+renderer.domElement.addEventListener('pointermove',function(e){
+  if(!down||!down.canBox)return;
+  if(!down.box&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>5){down.box=true; band=document.createElement('div'); band.className='band'; hud.appendChild(band);}
+  if(down.box){
+    var rect=rectOf(), x0=Math.min(down.x,e.clientX)-rect.left, y0=Math.min(down.y,e.clientY)-rect.top;
+    band.style.left=x0+'px'; band.style.top=y0+'px';
+    band.style.width=Math.abs(e.clientX-down.x)+'px'; band.style.height=Math.abs(e.clientY-down.y)+'px';
+    band.classList.toggle('crossing',e.clientX<down.x);
+  }
+});
+renderer.domElement.addEventListener('pointercancel',function(){down=null; endBand();});
 renderer.domElement.addEventListener('pointerup',function(e){
-  if(!down||!state.meshes.length)return;
-  var moved=Math.hypot(e.clientX-down.x,e.clientY-down.y),dt=performance.now()-down.t,b=down.b; down=null;
-  if(moved>5||dt>600||b!==0)return;
+  if(!down)return;
+  var d=down; down=null;
+  try{renderer.domElement.releasePointerCapture(d.id);}catch(err){}
+  if(!state.meshes.length){endBand(); return;}
+  if(d.box){
+    endBand();
+    var picked=boxSelect(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x);
+    setSelection(e.shiftKey?state.sel.concat(picked):picked,{noScroll:true});
+    return;
+  }
+  var moved=Math.hypot(e.clientX-d.x,e.clientY-d.y),dt=performance.now()-d.t;
+  if(moved>5||dt>600||d.b!==0)return;
   if(state.measuring){var m=measurePick(e.clientX,e.clientY); if(m)addEnt(m); return;}
-  var hit=rayHit(e.clientX,e.clientY);
-  if(hit){var n=hit.object.userData.node; select(n); focusInfo(n);} else select(null);
+  var hit=rayHit(e.clientX,e.clientY), add=e.shiftKey||e.ctrlKey||e.metaKey;
+  if(hit){var n=hit.object.userData.node; if(add)toggleSelect(n); else select(n);}
+  else if(!add)select(null);
 });
 var viewKeys={'1':'front','2':'back','3':'left','4':'right','5':'top','6':'bottom','7':'iso'};
 document.addEventListener('keydown',function(e){
   var t=e.target, typing=t&&(t.tagName==='INPUT'&&t.type!=='checkbox'||t.tagName==='TEXTAREA'||t.tagName==='SELECT');
   if(e.key==='Escape'){
     if(typing&&t.id==='search'){t.blur();}
-    var had=state.ents.length||state.selected;
+    var had=state.ents.length||state.sel.length;
     clearAll(); $('spanel').classList.remove('on');
     if(!had&&state.measuring)setMeasuring(false);
     if(!$('help').hidden){$('help').hidden=true; $('btnHelp').setAttribute('aria-expanded','false');}
@@ -614,6 +785,7 @@ document.addEventListener('keydown',function(e){
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==='m'||e.key==='M'){e.preventDefault(); setMeasuring(!state.measuring);}
   else if(e.key==='f'||e.key==='F'){e.preventDefault(); fit();}
+  else if((e.key==='h'||e.key==='H')&&state.sel.length){e.preventDefault(); $('btnHideSel').click();}
 });
 
 // ---------- file input ----------
@@ -635,5 +807,5 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostnam
   window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
 }
 $('btnTree').onclick=function(){var a=$('aside'),o=!a.classList.contains('open'); a.classList.toggle('open',o); this.setAttribute('aria-expanded',o);};
-window.__edv={state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
