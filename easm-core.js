@@ -26,7 +26,10 @@ var EASM = (function () {
       if (em[i] === 0x5a && em[i + 1] === 0x78) {
         var b = em[i + 2];
         if (b === 0x01 || b === 0x5e || b === 0x9c || b === 0xda) {
-          return fflate.inflateSync(em.subarray(i + 3));
+          var out = fflate.inflateSync(em.subarray(i + 3));
+          var vm = /HSF V(\d+)\.(\d+)/.exec(head);
+          out.hsfVersion = vm ? parseInt(vm[1], 10) * 100 + parseInt(vm[2], 10) : 0;
+          return out;
         }
       }
     }
@@ -45,7 +48,20 @@ var EASM = (function () {
     return '/' + out.join('/');
   }
 
+  // HSF 20 and later write one extra byte in several records (views, matrices, includes, shells).
+  // Older files (HSF 19, saved by earlier SolidWorks releases) don't. Try the layout the version
+  // suggests, and fall back to the other one if that read isn't clean.
   function parse(d) {
+    var guess = (d.hsfVersion && d.hsfVersion < 2000) ? 0 : 1, first = null, firstErr = null;
+    try { first = parseWith(d, guess); } catch (e) { firstErr = e; }
+    if (first && !first.scanned) return first;
+    var second = null;
+    try { second = parseWith(d, guess ? 0 : 1); } catch (e2) { if (!first) throw firstErr; }
+    if (!first) return second;
+    if (!second) return first;
+    return (second.shellCount - second.scanned) > (first.shellCount - first.scanned) ? second : first;
+  }
+  function parseWith(d, X) {
     var dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
     var N = d.length;
     var latin = new TextDecoder('latin1');
@@ -78,8 +94,8 @@ var EASM = (function () {
         if (c === 0x29 || c === 0x71) { q += 1; continue; }
         if (c === 0x28) { var L = d[q + 1]; if (!printable(q + 2, q + 2 + L)) return false; q += 2 + L; continue; }
         if (c === 0x55) { var L2 = u16(q + 1); if (L2 > 60000 || !printable(q + 3, q + 3 + L2)) return false; q += 3 + L2; continue; }
-        if (c === 0x3c) { if (d[q + 1] !== 0) return false; var L3 = d[q + 2]; if (!printable(q + 3, q + 3 + L3)) return false; q += 3 + L3; continue; }
-        if (c === 0x25) { q += 49; continue; }
+        if (c === 0x3c) { if (X && d[q + 1] !== 0) return false; var L3 = d[q + 1 + X]; if (!printable(q + 2 + X, q + 2 + X + L3)) return false; q += 2 + X + L3; continue; }
+        if (c === 0x25) { q += 48 + X; continue; }
         if (c === 0x16) { var L4 = u16(q + 1); if (L4 > 30000) return false; q += 3 + 2 * L4; continue; }
         if (c === 0x53 || c === 0x52 || c === 0x56 || c === 0x7e || c === 0x48) return n > 0;
         return false;
@@ -108,18 +124,20 @@ var EASM = (function () {
             L = u16(p); var txt = latin.decode(d.subarray(p + 2, p + 2 + L)); p += 2 + L;
             var sg = segs.get(cur); if (!sg.opts) sg.opts = txt; break;
           case 0x16: p += 2 + 2 * u16(p); break; // unicode options
-          case 0x7d: p += 46; p += 1 + d[p]; break; // } view
+          case 0x7d: p += 45 + X; p += 1 + d[p]; break; // } view
           case 0x68: p += 1; break; // h handedness
           case 0x4a: p += 1 + d[p]; p += 2 + u16(p); break; // J line style
           case 0x48: var hm = u16(p); p += 4 + ((hm & 4) ? 1 : 0); break; // H heuristics
           case 0x56: // V visibility
-            if (d[p] & 0x80) { segs.get(cur).vis = [u16(p), i32(p + 2)]; p += 6; }
-            else { segs.get(cur).vis = [d[p], d[p + 1]]; p += 2; }
+            // mask then value, each: low byte, +2 bytes if bit 7 is set, +1 more if the top bit of those is set
+            var vm0 = d[p], vext = (vm0 & 0x80) ? 2 : 0, vext2 = (vext && (d[p + 2] & 0x80)) ? 1 : 0, vlen = 1 + vext + vext2;
+            segs.get(cur).vis = [vm0, d[p + vlen]];
+            p += 2 * vlen;
             break;
-          case 0x25: // % modelling matrix (flag + 12 floats, row-vector 4x3)
+          case 0x25: // % modelling matrix (12 floats, row-vector 4x3; HSF 20+ puts a flag byte first)
             var m = new Float32Array(12);
-            for (var k = 0; k < 12; k++) m[k] = dv.getFloat32(p + 1 + 4 * k, true);
-            segs.get(cur).matrix = m; p += 49; break;
+            for (var k = 0; k < 12; k++) m[k] = dv.getFloat32(p + X + 4 * k, true);
+            segs.get(cur).matrix = m; p += 48 + X; break;
           case 0x24: p += 48; break; // $ texture matrix
           case 0x26: { // & repeat an earlier surface with a transform
             var rm = new Float32Array(12);
@@ -139,7 +157,7 @@ var EASM = (function () {
           case 0x3d: case 0x0e: p += 4; break; // line / edge weight
           case 0x07: p += 1 + d[p]; break; // callback
           case 0x3c: case 0x7b: // < include, { style
-            p += 1; L = d[p]; name = latin.decode(d.subarray(p + 1, p + 1 + L)); p += 1 + L;
+            p += X; L = d[p]; name = latin.decode(d.subarray(p + 1, p + 1 + L)); p += 1 + L;
             if (c === 0x3c) segs.get(cur).includes.push(normPath(cur, name));
             break;
           case 0x74: p += 1 + d[p]; p += 1 + d[p]; p += 6; break; // t texture
@@ -148,7 +166,7 @@ var EASM = (function () {
             stack.push(tg && tg.path ? tg.path : cur); break;
           case 0x71: tags.push(last); break; // q tag
           case 0x53: { // S shell
-            p++; var f = d[p++], sub2 = 0, key = -1;
+            p += X; var f = d[p++], sub2 = 0, key = -1;
             if (f & 0x80) { sub2 = u16(p); p += 2; }
             if (!(f & 0x10)) { key = i32(p); p += 4; }
             p++; // lod
@@ -163,6 +181,7 @@ var EASM = (function () {
                 if (o === 0x63) break;
                 else if (o === 0x01) { p += 2; p += 4 + i32(p); }
                 else if (o === 0x1c) { var kk = d[p]; p += 1 + 4 * kk * n; }
+                else if (o === 0x03) { var pk = d[p + 1]; p += 3 + 8 * pk; p += 4 + i32(p); } // quantised texture coordinates
                 else { p--; break; } // no terminator: the next record starts here
               }
             }
@@ -210,6 +229,11 @@ var EASM = (function () {
     segs.forEach(function (s, k) { if (!root && /\/3dmodel$/.test(k)) root = k; });
     var title = '';
     segs.forEach(function (s) { if (!title) { var mm = /refname=([^,]*)/.exec(s.opts); if (mm) title = mm[1]; } });
+    if (!title) segs.forEach(function (s) {
+      if (title) return;
+      var mb = /mbd_comp_name=`([^`/]*)`/.exec(s.opts);   // a top-level component: `Name-1@Assembly`
+      if (mb && mb[1].lastIndexOf('@') > 0) title = mb[1].slice(mb[1].lastIndexOf('@') + 1);
+    });
     // Mass properties SolidWorks saved for the top-level model (SI units), if any.
     var mass = null;
     segs.forEach(function (s, k) {
@@ -247,6 +271,7 @@ var EASM = (function () {
           if (o === 0x63) break;
           else if (o === 0x01) { e += 2; var L = dv.getInt32(e, true); if (L < 0 || e + 4 + L > N) return null; e += 4 + L; }
           else if (o === 0x1c) { var kk = d[e]; if (kk > 8) return null; e += 1 + 4 * kk * n; }
+          else if (o === 0x03) { var pk = d[e + 1]; if (pk > 8) return null; e += 3 + 8 * pk; var L3 = dv.getInt32(e, true); if (L3 < 0 || e + 4 + L3 > N) return null; e += 4 + L3; }
           else { e--; break; }
         }
       }
@@ -318,7 +343,12 @@ var EASM = (function () {
 
   function nameOf(opts) {
     var mm = /(?:^|,)name=([^,]*)/.exec(opts || '');
-    return mm ? mm[1] : null;
+    if (mm) return mm[1];
+    // Older files only carry the component path, e.g. `Sub-1@Top/Part-2@Sub`: use the last component.
+    var mb = /mbd_comp_name=`([^`]*)`/.exec(opts || '');
+    if (!mb) return null;
+    var last = mb[1].slice(mb[1].lastIndexOf('/') + 1), at = last.lastIndexOf('@');
+    return (at > 0 ? last.slice(0, at) : last) || null;
   }
 
   return { scanShells: scanShells, unpack: unpack, inflateModel: inflateModel, parse: parse, decodeShell: decodeShell, boundaryEdges: boundaryEdges, nameOf: nameOf };

@@ -132,17 +132,17 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 7)</small></div>
+    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 8)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <button class="btn primary" id="btnOpen">Open file</button>
-      <button class="btn" id="btnFit" disabled>Fit</button>
+      <button class="btn" id="btnFit" title="Zoom to fit (double-click the mouse wheel)" disabled>Fit</button>
       <select class="btn" id="selView" aria-label="Standard view" disabled>
         <option value="iso">Isometric</option><option value="front">Front</option><option value="back">Back</option>
         <option value="top">Top</option><option value="bottom">Bottom</option><option value="right">Right</option><option value="left">Left</option>
       </select>
       <select class="btn" id="selProj" aria-label="Projection" disabled><option value="ortho">Orthographic</option><option value="persp">Perspective</option></select>
-      <button class="btn" id="btnEdges" aria-pressed="true" disabled>Edges</button>
+      <select class="btn" id="selDisplay" aria-label="Display style" disabled><option value="shadedEdges">Shaded with edges</option><option value="shaded">Shaded</option><option value="hlr">Hidden lines removed</option><option value="wire">Wireframe</option></select>
       <button class="btn" id="btnMeasure" aria-pressed="false" title="Measure (M)" disabled>Measure</button>
       <button class="btn" id="btnMass" aria-pressed="false" title="Mass properties" disabled>Mass</button>
       <select class="btn" id="selUnits" aria-label="Units">
@@ -187,7 +187,9 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad. Start the drag on the model and it turns about that point.</dd>
           <dt>Pan</dt><dd>Ctrl + drag, or right-drag</dd>
           <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + middle-drag also zooms.</dd>
-          <dt>Fit</dt><dd>F</dd>
+          <dt>Zoom to fit</dt><dd>Double-click the mouse wheel, or use the Fit button.</dd>
+          <dt>Normal to</dt><dd>F turns the view square-on to the flat face under the pointer, or to the last flat face picked in Measure. With no flat face there, it snaps to the nearest standard view (front, back, left, right, top or bottom).</dd>
+          <dt>Display</dt><dd>The display menu switches between Shaded with edges, Shaded, Hidden lines removed and Wireframe. Wireframe shows every edge, including the ones behind.</dd>
           <dt>Projection</dt><dd>Orthographic (SolidWorks default) or Perspective, from the menu in the toolbar</dd>
           <dt>Measure</dt><dd>M, then move over the model: corners, edges and faces light up before you click. Two picks give the distance or angle between them.</dd>
           <dt>Mass</dt><dd>Shows the mass properties saved in the file for the whole model, and volume with an estimated mass for selected parts.</dd>
@@ -202,13 +204,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     </section>
   </main>
 </div>
-<script src="three.min.js?v=7"></script>
-<script src="OrbitControls.js?v=7"></script>
-<script src="LineSegmentsGeometry.js?v=7"></script>
-<script src="LineMaterial.js?v=7"></script>
-<script src="LineSegments2.js?v=7"></script>
-<script src="fflate.js?v=7"></script>
-<script src="easm-core.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="three.min.js?v=8"></script>
+<script src="OrbitControls.js?v=8"></script>
+<script src="LineSegmentsGeometry.js?v=8"></script>
+<script src="LineMaterial.js?v=8"></script>
+<script src="LineSegments2.js?v=8"></script>
+<script src="fflate.js?v=8"></script>
+<script src="easm-core.js?v=8"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

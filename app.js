@@ -107,13 +107,30 @@ var fatHover=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C
 var faceSelMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.5,side:THREE.DoubleSide,depthWrite:false});
 var faceHoverMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.28,side:THREE.DoubleSide,depthWrite:false});
 function refreshThemeColors(){
-  edgeMat.color.set(css('--edge')||'#27313A'); selMat.color.set(css('--accent')||'#2463D9');
+  edgeMat.color.set(css('--edge')||'#27313A'); selMat.color.set(css('--accent')||'#2463D9'); selEdgeMat.color.set(css('--accent')||'#2463D9');
   [fatSel,fatDim,fatHover,faceSelMat,faceHoverMat].forEach(function(m){m.color.set(css('--measure')||'#C8246F');}); needsRender=true;
 }
 if(window.matchMedia){var mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refreshThemeColors):mq.addListener(refreshThemeColors));}
 
 var needsRender=true;
-var state={model:null,root:null,meshes:[],edgesOn:true,measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null,pivotAt:null};
+// Display styles: shaded with edges, shaded, hidden lines removed, wireframe.
+var hiddenMat=new THREE.MeshBasicMaterial({visible:false,side:THREE.DoubleSide});
+var hlrMat=new THREE.MeshBasicMaterial({colorWrite:false,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});
+var selEdgeMat=new THREE.LineBasicMaterial({color:new THREE.Color(css('--accent')||'#2463D9')});
+var displayMode='shadedEdges'; try{displayMode=localStorage.getItem('edv.display')||'shadedEdges';}catch(e){}
+if(['shadedEdges','shaded','hlr','wire'].indexOf(displayMode)<0)displayMode='shadedEdges';
+function styleMesh(m){
+  var lines=displayMode==='wire'||displayMode==='hlr', sel=!!m.userData.sel;
+  m.material=displayMode==='wire'?hiddenMat:(displayMode==='hlr'?hlrMat:(sel?selMat:m.userData.base));
+  var ed=m.userData.edges;
+  if(ed){ed.material=(sel&&lines)?selEdgeMat:edgeMat; ed.visible=m.visible&&displayMode!=='shaded';}
+}
+function setDisplay(mode){
+  displayMode=mode; $('selDisplay').value=mode; try{localStorage.setItem('edv.display',mode);}catch(e){}
+  edgeMat.opacity=(mode==='wire'||mode==='hlr')?0.9:0.55;
+  state.meshes.forEach(styleMesh); needsRender=true;
+}
+var state={model:null,root:null,meshes:[],measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null,pivotAt:null};
 var matCache=new Map();
 function matFor(rgb){
   var k=rgb.join(','), m=matCache.get(k);
@@ -250,9 +267,9 @@ async function build(model,fileName){
   }
   modelRoot.updateMatrixWorld(true);
   renderTree(rootNode); applyVisibility();
-  ['btnFit','selView','selProj','btnEdges','btnMeasure','btnMass','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
+  ['btnFit','selView','selProj','selDisplay','btnMeasure','btnMass','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   $('empty').style.display='none';
-  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 7';
+  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 8';
   state.radius=1; setView('iso'); updateMass();
 }
 
@@ -260,7 +277,7 @@ async function build(model,fileName){
 function applyVisibility(){
   (function rec(n,on){
     var v=on&&n.visible;
-    for(var i=0;i<n.meshes.length;i++){var m=n.meshes[i]; m.visible=v; if(m.userData.edges)m.userData.edges.visible=v&&state.edgesOn;}
+    for(var i=0;i<n.meshes.length;i++){var m=n.meshes[i]; m.visible=v; styleMesh(m);}
     if(n.row)n.row.classList.toggle('off',!v);
     if(n.cb)n.cb.checked=n.visible;
     for(i=0;i<n.children.length;i++)rec(n.children[i],v);
@@ -322,10 +339,10 @@ function selMeshes(){
   return Array.from(set);
 }
 function setSelection(nodes,opts){
-  selMeshes().forEach(function(m){m.material=m.userData.base;});
+  selMeshes().forEach(function(m){m.userData.sel=false; styleMesh(m);});
   state.sel.forEach(function(n){if(n.row)n.row.classList.remove('sel');});
   state.sel=nodes.filter(function(n,i){return n&&nodes.indexOf(n)===i;});
-  selMeshes().forEach(function(m){m.material=selMat;});
+  selMeshes().forEach(function(m){m.userData.sel=true; styleMesh(m);});
   state.sel.forEach(function(n){if(n.row)n.row.classList.add('sel');});
   if(state.sel.length===1&&state.sel[0].row&&!(opts&&opts.noScroll)){expandTo(state.sel[0]); state.sel[0].row.scrollIntoView({block:'nearest'});}
   $('btnHideSel').disabled=!state.sel.length; $('btnIsolate').disabled=!state.sel.length;
@@ -499,6 +516,44 @@ function fit(list,dir){
 var dirs={iso:[1,0.75,1.15],front:[0,0,1],back:[0,0,-1],top:[0,1,0.0001],bottom:[0,-1,0.0001],right:[1,0,0],left:[-1,0,0]};
 function setView(v){var d=dirs[v]||dirs.iso; camera.up.set(0,1,0); fit(null,new THREE.Vector3(d[0],d[1],d[2]).normalize()); $('selView').value=v;}
 $('btnFit').onclick=function(){fit();};
+// Turn the view to look straight along dir (pointing from the model towards the eye), keeping the
+// pivot point where it already is on screen.
+function lookAlong(dir,pivot){
+  var cur=camera.position.clone().sub(controls.target), dist=cur.length()||1; cur.normalize();
+  dir=dir.clone().normalize();
+  if(Math.abs(dir.y)>0.9999){   // straight up or down: keep the nearest quarter-turn so the model doesn't spin
+    var az=Math.round(Math.atan2(cur.x,cur.z)/(Math.PI/2))*(Math.PI/2);
+    dir.set(Math.sin(az)*1e-4,dir.y>0?1:-1,Math.cos(az)*1e-4).normalize();
+  }
+  camera.updateMatrixWorld();
+  var e=camera.matrixWorld.elements, r=new THREE.Vector3(e[0],e[1],e[2]), u=new THREE.Vector3(e[4],e[5],e[6]);
+  var o=(pivot||controls.target).clone().sub(controls.target), a=o.dot(r), b=o.dot(u), w=o.dot(cur);
+  var r2=new THREE.Vector3().crossVectors(Y_AXIS,dir).normalize(), u2=new THREE.Vector3().crossVectors(dir,r2);
+  var t2=(pivot||controls.target).clone().addScaledVector(r2,-a).addScaledVector(u2,-b).addScaledVector(dir,-w);
+  controls.target.copy(t2); camera.position.copy(t2).addScaledVector(dir,dist); camera.up.set(0,1,0);
+  updateClip(); controls.update(); needsRender=true;
+}
+function shellOfHit(h){
+  var ss=h.object.userData.g.shellStart, ti=h.faceIndex*3, lo=0, hi=ss.length-2;
+  while(lo<hi){var mid=(lo+hi+1)>>1; if(ss[mid]<=ti)lo=mid; else hi=mid-1;}
+  return lo;
+}
+// F: look square-on at the flat face under the pointer (or the last flat face picked in Measure);
+// with no flat face there, snap to the nearest standard view.
+function normalTo(){
+  if(!state.meshes.length)return;
+  var cur=camera.position.clone().sub(controls.target).normalize(), n=null, pivot=null;
+  if(mouse.inside){
+    var h=rayHit(mouse.x,mouse.y);
+    if(h&&h.faceIndex!=null){var fe=faceEntity(h.object,shellOfHit(h)); if(fe.planar){n=fe.n.clone(); pivot=h.point.clone();}}
+  }
+  if(!n)for(var i=state.ents.length-1;i>=0;i--){var en=state.ents[i]; if(en.type==='face'&&en.planar){n=en.n.clone(); pivot=en.c.clone(); break;}}
+  if(n){if(n.dot(cur)<0)n.negate(); lookAlong(n,pivot); return;}
+  var names={front:[0,0,1],back:[0,0,-1],top:[0,1,0],bottom:[0,-1,0],right:[1,0,0],left:[-1,0,0]}, best=-2, pick='front';
+  Object.keys(names).forEach(function(k){var d=cur.x*names[k][0]+cur.y*names[k][1]+cur.z*names[k][2]; if(d>best){best=d; pick=k;}});
+  lookAlong(new THREE.Vector3(names[pick][0],names[pick][1],names[pick][2]),null); $('selView').value=pick;
+}
+var mouse={x:0,y:0,inside:false}, lastMid=null;
 function setProjection(mode){
   var next=mode==='ortho'?ortho:persp;
   $('selProj').value=mode; try{localStorage.setItem('edv.proj',mode);}catch(e){}
@@ -515,7 +570,8 @@ function setProjection(mode){
 $('selProj').onchange=function(){setProjection(this.value);};
 (function(){var m='ortho'; try{m=localStorage.getItem('edv.proj')||'ortho';}catch(e){} setProjection(m);})();
 $('selView').onchange=function(){setView(this.value);};
-$('btnEdges').onclick=function(){state.edgesOn=!state.edgesOn; this.setAttribute('aria-pressed',state.edgesOn); applyVisibility();};
+$('selDisplay').onchange=function(){setDisplay(this.value);};
+$('selDisplay').value=displayMode; edgeMat.opacity=(displayMode==='wire'||displayMode==='hlr')?0.9:0.55;
 $('btnHelp').onclick=function(){var h=$('help'), o=h.hidden; h.hidden=!o; this.setAttribute('aria-expanded',o);};
 
 // ---------- picking ----------
@@ -855,13 +911,18 @@ var down=null, band=null, rot=null;
 function endRotate(){if(!rot)return; try{renderer.domElement.releasePointerCapture(rot.id);}catch(err){} rot=null; state.pivotAt=null; pivotEl.style.display='none'; needsRender=true;}
 renderer.domElement.addEventListener('mousedown',function(e){if(e.button===1)e.preventDefault();});
 renderer.domElement.addEventListener('auxclick',function(e){e.preventDefault();});
-renderer.domElement.addEventListener('pointerleave',function(){if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
+renderer.domElement.addEventListener('pointerleave',function(){mouse.inside=false; if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
 function endBand(){if(band){band.remove(); band=null;}}
 renderer.domElement.addEventListener('pointerdown',function(e){
   // Middle-drag (or Alt + left-drag) rotates about the point on the model under the pointer.
   if(e.pointerType==='mouse'&&state.meshes.length&&!e.ctrlKey&&!e.metaKey&&((e.button===1&&!e.shiftKey)||(e.button===0&&e.altKey))){
+    if(e.button===1){   // double-click the wheel: zoom to fit
+      var now=performance.now();
+      if(lastMid&&now-lastMid.t<450&&Math.hypot(e.clientX-lastMid.x,e.clientY-lastMid.y)<8){lastMid=null; down=null; e.preventDefault(); fit(); return;}
+      lastMid={t:now,x:e.clientX,y:e.clientY};
+    }
     var ph=rayHit(e.clientX,e.clientY);
-    rot={id:e.pointerId,x:e.clientX,y:e.clientY,pivot:ph?ph.point.clone():controls.target.clone()};
+    rot={id:e.pointerId,x:e.clientX,y:e.clientY,moved:0,pivot:ph?ph.point.clone():controls.target.clone()};
     state.pivotAt=ph?rot.pivot:null; pivotEl.style.display=ph?'':'none';
     try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}
     clearHover(); down=null; e.preventDefault(); needsRender=true; return;
@@ -871,7 +932,8 @@ renderer.domElement.addEventListener('pointerdown',function(e){
   if(down.canBox){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
 });
 renderer.domElement.addEventListener('pointermove',function(e){
-  if(rot){rotateAbout(rot.pivot,e.clientX-rot.x,e.clientY-rot.y); rot.x=e.clientX; rot.y=e.clientY; return;}
+  mouse.x=e.clientX; mouse.y=e.clientY; mouse.inside=true;
+  if(rot){rot.moved+=Math.abs(e.clientX-rot.x)+Math.abs(e.clientY-rot.y); if(rot.moved>6)lastMid=null; rotateAbout(rot.pivot,e.clientX-rot.x,e.clientY-rot.y); rot.x=e.clientX; rot.y=e.clientY; return;}
   if(state.measuring&&!down&&e.buttons===0&&e.pointerType==='mouse')queueHover(e.clientX,e.clientY);
   if(!down||!down.canBox)return;
   if(!down.box&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>5){down.box=true; band=document.createElement('div'); band.className='band'; hud.appendChild(band);}
@@ -917,7 +979,7 @@ document.addEventListener('keydown',function(e){
   if((e.ctrlKey||e.metaKey)&&viewKeys[e.key]){e.preventDefault(); setView(viewKeys[e.key]); return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==='m'||e.key==='M'){e.preventDefault(); setMeasuring(!state.measuring);}
-  else if(e.key==='f'||e.key==='F'){e.preventDefault(); fit();}
+  else if(e.key==='f'||e.key==='F'){e.preventDefault(); normalTo();}
   else if((e.key==='h'||e.key==='H')&&state.sel.length){e.preventDefault(); $('btnHideSel').click();}
 });
 
@@ -940,5 +1002,5 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostnam
   window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
 }
 $('btnTree').onclick=function(){var a=$('aside'),o=!a.classList.contains('open'); a.classList.toggle('open',o); this.setAttribute('aria-expanded',o);};
-window.__edv={faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
