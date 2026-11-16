@@ -29,10 +29,25 @@ view.addEventListener('pointerdown',function(e){
   if(e.pointerType!=='mouse')return;
   var pan=e.ctrlKey||e.metaKey;
   // OrbitControls turns a rotate drag into a pan when Ctrl/Cmd is held, so ROTATE covers both.
-  controls.mouseButtons.LEFT=(e.altKey||pan)?THREE.MOUSE.ROTATE:-1;
-  controls.mouseButtons.MIDDLE=(e.shiftKey&&!pan)?THREE.MOUSE.DOLLY:THREE.MOUSE.ROTATE;
+  controls.mouseButtons.LEFT=pan?THREE.MOUSE.ROTATE:-1;
+  controls.mouseButtons.MIDDLE=pan?THREE.MOUSE.ROTATE:(e.shiftKey?THREE.MOUSE.DOLLY:-1);
 },true);
 var hud=document.createElement('div'); hud.className='overlay'; view.insertBefore(hud,$('mpanel'));
+var pivotEl=document.createElement('div'); pivotEl.className='pivot'; pivotEl.style.display='none'; hud.appendChild(pivotEl);
+var Y_AXIS=new THREE.Vector3(0,1,0);
+// Turn the view about a fixed point P (the point picked when the drag started), keeping P still on screen.
+function rotateAbout(P,dx,dy){
+  var h=renderer.domElement.clientHeight||1, az=2*Math.PI*dx/h*0.8, el=2*Math.PI*dy/h*0.8;
+  var off=camera.position.clone().sub(controls.target), phi=off.angleTo(Y_AXIS);
+  var np=Math.max(0.02,Math.min(Math.PI-0.02,phi-el)); el=phi-np;
+  var right=new THREE.Vector3().crossVectors(Y_AXIS,off);
+  if(right.lengthSq()<1e-12)right.set(1,0,0).applyQuaternion(camera.quaternion);
+  right.normalize();
+  var q=new THREE.Quaternion().setFromAxisAngle(Y_AXIS,-az).multiply(new THREE.Quaternion().setFromAxisAngle(right,-el));
+  camera.position.sub(P).applyQuaternion(q).add(P);
+  controls.target.sub(P).applyQuaternion(q).add(P);
+  controls.update(); needsRender=true;
+}
 var comEl=document.createElement('div'); comEl.className='com'; comEl.style.display='none'; comEl.title='Centre of mass'; hud.appendChild(comEl);
 renderer.domElement.addEventListener('contextmenu',function(e){e.preventDefault();});
 var reverseZoom=false;
@@ -88,14 +103,17 @@ var edgeMat=new THREE.LineBasicMaterial({color:new THREE.Color(css('--edge')||'#
 var selMat=new THREE.MeshPhongMaterial({color:new THREE.Color(css('--accent')||'#2463D9'),side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1,shininess:40});
 var fatSel=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:4,depthTest:false,transparent:true});
 var fatDim=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:2,depthTest:false,transparent:true,dashed:false});
+var fatHover=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:5,depthTest:false,transparent:true,opacity:0.55});
+var faceSelMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.5,side:THREE.DoubleSide,depthWrite:false});
+var faceHoverMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.28,side:THREE.DoubleSide,depthWrite:false});
 function refreshThemeColors(){
   edgeMat.color.set(css('--edge')||'#27313A'); selMat.color.set(css('--accent')||'#2463D9');
-  fatSel.color.set(css('--measure')||'#C8246F'); fatDim.color.set(css('--measure')||'#C8246F'); needsRender=true;
+  [fatSel,fatDim,fatHover,faceSelMat,faceHoverMat].forEach(function(m){m.color.set(css('--measure')||'#C8246F');}); needsRender=true;
 }
 if(window.matchMedia){var mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refreshThemeColors):mq.addListener(refreshThemeColors));}
 
 var needsRender=true;
-var state={model:null,root:null,meshes:[],edgesOn:true,measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null};
+var state={model:null,root:null,meshes:[],edgesOn:true,measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null,pivotAt:null};
 var matCache=new Map();
 function matFor(rgb){
   var k=rgb.join(','), m=matCache.get(k);
@@ -105,7 +123,7 @@ function matFor(rgb){
 function resize(){
   var w=view.clientWidth,h=view.clientHeight; if(!w||!h)return;
   renderer.setSize(w,h,false); persp.aspect=w/h; persp.updateProjectionMatrix(); setOrthoFrustum();
-  fatSel.resolution.set(w,h); fatDim.resolution.set(w,h); needsRender=true;
+  fatSel.resolution.set(w,h); fatDim.resolution.set(w,h); fatHover.resolution.set(w,h); needsRender=true;
 }
 window.addEventListener('resize',resize);
 if(window.ResizeObserver)new ResizeObserver(resize).observe(view);
@@ -159,10 +177,10 @@ function buildGeometry(model,seg){
   var pos=new Float32Array(total*3), idxCount=0;
   for(i=0;i<parts.length;i++)idxCount+=parts[i].idx.length;
   var IA=total>65535?Uint32Array:Uint16Array;
-  var idx=new IA(idxCount), edges=[], eshell=[], vo=0, io=0;
+  var idx=new IA(idxCount), edges=[], eshell=[], shellStart=[], vo=0, io=0;
   for(i=0;i<parts.length;i++){
     var r2=parts[i], n=r2.pos.length/3;
-    pos.set(r2.pos,vo*3);
+    pos.set(r2.pos,vo*3); shellStart.push(io);
     for(var j=0;j<r2.idx.length;j++)idx[io++]=r2.idx[j]+vo;
     var be=EASM.boundaryEdges(r2.idx,n);
     for(j=0;j<be.length;j+=2){edges.push(be[j]+vo,be[j+1]+vo); eshell.push(i);}
@@ -174,7 +192,8 @@ function buildGeometry(model,seg){
   geo.computeVertexNormals(); geo.computeBoundingBox(); geo.computeBoundingSphere();
   var eg=null, edgeIdx=new IA(edges);
   if(edges.length){eg=new THREE.BufferGeometry(); eg.setAttribute('position',geo.getAttribute('position')); eg.setIndex(new THREE.BufferAttribute(edgeIdx,1)); eg.boundingSphere=geo.boundingSphere; eg.boundingBox=geo.boundingBox;}
-  var g={geo:geo,edges:eg,tris:idxCount/3,edgeIdx:edgeIdx,edgeShell:new Int32Array(eshell),topo:null};
+  shellStart.push(io);
+  var g={geo:geo,edges:eg,tris:idxCount/3,edgeIdx:edgeIdx,edgeShell:new Int32Array(eshell),shellStart:new Uint32Array(shellStart),topo:null};
   geomCache.set(seg.path,g);
   return g;
 }
@@ -233,7 +252,7 @@ async function build(model,fileName){
   renderTree(rootNode); applyVisibility();
   ['btnFit','selView','selProj','btnEdges','btnMeasure','btnMass','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   $('empty').style.display='none';
-  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 6';
+  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 7';
   state.radius=1; setView('iso'); updateMass();
 }
 
@@ -380,12 +399,12 @@ function fmtMass(kg){
 function fmtVol(m3){
   if(state.units==='in')return num(m3*61023.7441,2)+' in³';
   if(state.units==='m')return num(m3,6)+' m³';
-  var cm3=m3*1e6; return cm3>=1e5?num(m3,4)+' m³':num(cm3,2)+' cm³';
+  var cm3=m3*1e6; return cm3>=1e4?num(m3,4)+' m³':num(cm3,2)+' cm³';
 }
 function fmtArea(m2){
   if(state.units==='in')return num(m2*1550.0031,2)+' in²';
   if(state.units==='m')return num(m2,4)+' m²';
-  var cm2=m2*1e4; return cm2>=1e5?num(m2,3)+' m²':num(cm2,2)+' cm²';
+  var cm2=m2*1e4; return cm2>=1e4?num(m2,3)+' m²':num(cm2,2)+' cm²';
 }
 function fmtInertia(v){return state.units==='in'?num(v*3417.1717,1)+' lb·in²':num(v,2)+' kg·m²';}
 // Volume and surface area of one body, from its triangles (signed-volume sum; assumes a closed solid).
@@ -584,40 +603,103 @@ function circumcenter(a,b,c){
   var t=ac.clone().multiplyScalar(ab.lengthSq()).cross(n).add(n.clone().cross(ab).multiplyScalar(ac.lengthSq()));
   return a.clone().add(t.divideScalar(2*n2));
 }
-// Measure pick: corner (snap) > edge > point on a face.
-function measurePick(cx,cy){
-  var rect=rectOf(), hit=null;
-  var offs=[[0,0],[7,0],[-7,0],[0,7],[0,-7],[5,5],[-5,-5],[5,-5],[-5,5]];
+// Measure pick: corner (snap) > edge > face. Used for both the hover highlight and the click.
+function measurePick(cx,cy,quick){
+  var rect=rectOf(), h0=rayHit(cx,cy), hit=h0;
+  var offs=quick?[[6,0],[-6,0],[0,6],[0,-6]]:[[7,0],[-7,0],[0,7],[0,-7],[5,5],[-5,-5],[5,-5],[-5,5]];
   for(var i=0;i<offs.length&&!hit;i++)hit=rayHit(cx+offs[i][0],cy+offs[i][1]);
   if(!hit)return null;
   var mesh=hit.object,g=mesh.userData.g,M=mesh.matrixWorld,T=topo(g);
-  var vdir=camera.getWorldDirection(new THREE.Vector3()), camPos=camera.position.clone();
-  var hitDepth=hit.point.clone().sub(camPos).dot(vdir);
-  var wpp=camera.isOrthographicCamera?(camera.top-camera.bottom)/camera.zoom/rect.height:2*hitDepth*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/rect.height;
-  var depthTol=wpp*30;
-  function visible(p){return p.clone().sub(camPos).dot(vdir)<=hitDepth+depthTol;}
-  // corners
-  var best=11,bestP=null;
+  camera.updateMatrixWorld();
+  var mv=new THREE.Matrix4().multiplyMatrices(camera.matrixWorldInverse,M), mvp=new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,mv);
+  var a=mvp.elements,b=mv.elements,W=rect.width,H=rect.height,X0=rect.left,Y0=rect.top,ortho2=camera.isOrthographicCamera;
+  var hitDepth=-hit.point.clone().applyMatrix4(camera.matrixWorldInverse).z;
+  var wpp=ortho2?(camera.top-camera.bottom)/camera.zoom/H:2*hitDepth*Math.tan(THREE.MathUtils.degToRad(camera.fov/2))/H;
+  var maxDepth=hitDepth+Math.abs(wpp)*30, P=T.pos, sx=0, sy=0, sd=0;
+  function proj(x,y,z){
+    var w=a[3]*x+a[7]*y+a[11]*z+a[15]; if(!ortho2&&w<=0)return false;
+    sx=((a[0]*x+a[4]*y+a[8]*z+a[12])/w+1)/2*W+X0; sy=(1-(a[1]*x+a[5]*y+a[9]*z+a[13])/w)/2*H+Y0;
+    sd=-(b[2]*x+b[6]*y+b[10]*z+b[14]); return true;
+  }
+  var best=11,bestC=-1;
   for(var c=0;c<T.corner.length;c++){
     if(!T.corner[c])continue;
-    var p=cpos(T,c,M),s=toScreen(p,rect),d=Math.hypot(s.x-cx,s.y-cy);
-    if(d<best&&visible(p)){best=d;bestP=p;}
+    var i3=T.rep[c]*3; if(!proj(P[i3],P[i3+1],P[i3+2]))continue;
+    var d=Math.hypot(sx-cx,sy-cy); if(d<best&&sd<=maxDepth){best=d;bestC=c;}
   }
-  if(bestP)return {type:'point',p:bestP,snapped:true,mesh:mesh};
-  // edges
-  var bestE=-1; best=9;
-  var E=g.edgeIdx,pa=new THREE.Vector3(),pb=new THREE.Vector3(),pos=g.geo.getAttribute('position');
-  for(var k=0;k<E.length/2;k++){
-    pa.fromBufferAttribute(pos,E[2*k]).applyMatrix4(M); pb.fromBufferAttribute(pos,E[2*k+1]).applyMatrix4(M);
-    var sa=toScreen(pa,rect),sb=toScreen(pb,rect);
-    if(sa.z>1||sb.z>1)continue;
-    var vx=sb.x-sa.x,vy=sb.y-sa.y,l2=vx*vx+vy*vy,t=l2?Math.max(0,Math.min(1,((cx-sa.x)*vx+(cy-sa.y)*vy)/l2)):0;
-    var dd=Math.hypot(sa.x+vx*t-cx,sa.y+vy*t-cy);
-    if(dd<best){var pw=pa.clone().lerp(pb,t); if(visible(pw)){best=dd;bestE=k;}}
+  if(bestC>=0)return {type:'point',p:cpos(T,bestC,M),snapped:true,mesh:mesh,key:'c'+mesh.id+'_'+bestC};
+  var E=g.edgeIdx,bestE=-1; best=9;
+  for(var k=0;k<E.length;k+=2){
+    var i1=E[k]*3,i2=E[k+1]*3;
+    if(!proj(P[i1],P[i1+1],P[i1+2]))continue;
+    var ax=sx,ay=sy,ad=sd;
+    if(!proj(P[i2],P[i2+1],P[i2+2]))continue;
+    var vx=sx-ax,vy=sy-ay,l2=vx*vx+vy*vy,t=l2?Math.max(0,Math.min(1,((cx-ax)*vx+(cy-ay)*vy)/l2)):0;
+    var dd=Math.hypot(ax+vx*t-cx,ay+vy*t-cy);
+    if(dd<best&&ad+(sd-ad)*t<=maxDepth){best=dd;bestE=k/2;}
   }
-  if(bestE>=0){var e=classify(chainFrom(g,bestE,M)); e.mesh=mesh; return e;}
-  var h0=rayHit(cx,cy);
-  return h0?{type:'point',p:h0.point.clone(),snapped:false,mesh:h0.object}:null;
+  if(bestE>=0){
+    var e=classify(chainFrom(g,bestE,M)), sum=0;
+    e.pts.forEach(function(p){sum+=p.x+p.y*1.7+p.z*2.3;});
+    e.mesh=mesh; e.key='e'+mesh.id+'_'+e.pts.length+'_'+Math.round(sum*1e4); return e;
+  }
+  if(!h0||h0.faceIndex==null)return null;
+  var fg=h0.object.userData.g, ti=h0.faceIndex*3, ss=fg.shellStart, lo=0, hi=ss.length-2;
+  while(lo<hi){var mid=(lo+hi+1)>>1; if(ss[mid]<=ti)lo=mid; else hi=mid-1;}
+  return {type:'face',mesh:h0.object,shell:lo,key:'f'+h0.object.id+'_'+lo};
+}
+// Everything needed to measure one CAD face: its triangles, area, perimeter and (if flat) its plane.
+function faceEntity(mesh,si){
+  var g=mesh.userData.g, ix=g.geo.getIndex().array, pos=g.geo.getAttribute('position').array, M=mesh.matrixWorld;
+  var s0=g.shellStart[si], n=g.shellStart[si+1]-s0, tri=new Float32Array(n*3), seen=new Map();
+  function wv(vi){var w=seen.get(vi); if(!w){w=new THREE.Vector3(pos[vi*3],pos[vi*3+1],pos[vi*3+2]).applyMatrix4(M); seen.set(vi,w);} return w;}
+  for(var k=0;k<n;k++){var w=wv(ix[s0+k]); tri[k*3]=w.x; tri[k*3+1]=w.y; tri[k*3+2]=w.z;}
+  var area=0, va=new THREE.Vector3(), c=new THREE.Vector3(), A=new THREE.Vector3(), B=new THREE.Vector3(), C=new THREE.Vector3(), cr=new THREE.Vector3();
+  for(k=0;k<n*3;k+=9){
+    A.set(tri[k],tri[k+1],tri[k+2]); B.set(tri[k+3],tri[k+4],tri[k+5]); C.set(tri[k+6],tri[k+7],tri[k+8]);
+    cr.crossVectors(B.clone().sub(A),C.clone().sub(A)); var ta=cr.length()/2;
+    area+=ta; va.addScaledVector(cr,0.5); c.addScaledVector(A.add(B).add(C),ta/3);
+  }
+  if(area>0)c.divideScalar(area);
+  var all=Array.from(seen.values()), nrm=null, planar=false;
+  if(area>0&&va.length()/area>0.999){
+    nrm=va.clone().normalize(); planar=true;
+    var tol=Math.max(1e-6,2e-4*Math.sqrt(area));
+    for(k=0;k<all.length;k++)if(Math.abs(all[k].clone().sub(c).dot(nrm))>tol){planar=false;break;}
+  }
+  var perim=0, E=g.edgeIdx, S=g.edgeShell;
+  for(k=0;k<S.length;k++)if(S[k]===si)perim+=wv(E[2*k]).distanceTo(wv(E[2*k+1]));
+  var step=Math.max(1,Math.ceil(all.length/800)), pts=all.filter(function(p,i){return i%step===0;});
+  return {type:'face',mesh:mesh,shell:si,key:'f'+mesh.id+'_'+si,tri:tri,area:area,perim:perim,planar:planar,n:planar?nrm:null,c:c,pts:pts};
+}
+function faceOverlay(e,mat,list){
+  var geo=new THREE.BufferGeometry(); geo.setAttribute('position',new THREE.BufferAttribute(e.tri,3));
+  var m=new THREE.Mesh(geo,mat); m.renderOrder=998; m.raycast=function(){}; scene.add(m); list.push(m); return m;
+}
+// Hover preview while measuring: shows what a click would pick.
+var hover={key:null,objs:[],el:null,pt:null,timer:null,last:0,x:0,y:0};
+function clearHover(){
+  hover.objs.forEach(function(o){scene.remove(o); o.geometry.dispose();}); hover.objs=[];
+  if(hover.el){hover.el.remove(); hover.el=null;} hover.pt=null;
+  if(hover.key!==null){hover.key=null; needsRender=true;}
+}
+function doHover(){
+  hover.timer=null; hover.last=performance.now();
+  if(!state.measuring||down||rot){clearHover(); return;}
+  var e=measurePick(hover.x,hover.y,true), key=e?e.key:null;
+  if(key===hover.key)return;
+  clearHover(); hover.key=key; needsRender=true;
+  if(!e)return;
+  if(e.type==='point'){hover.el=document.createElement('div'); hover.el.className='dot snap hov'; hud.appendChild(hover.el); hover.pt=e.p;}
+  else if(e.type==='face')faceOverlay(faceEntity(e.mesh,e.shell),faceHoverMat,hover.objs);
+  else{
+    fatLines(polySegs(e.pts,e.closed),fatHover,hover.objs);
+    if(e.type==='arc'){hover.el=document.createElement('div'); hover.el.className='dot ctr hov'; hud.appendChild(hover.el); hover.pt=e.c;}
+  }
+}
+function queueHover(x,y){
+  hover.x=x; hover.y=y;
+  if(hover.timer===null)hover.timer=setTimeout(doHover,Math.max(0,60-(performance.now()-hover.last)));
 }
 
 // ---------- measuring ----------
@@ -627,6 +709,7 @@ function fmtA(rad){return (rad*180/Math.PI).toFixed(2)+'°';}
 function setMeasuring(on){
   state.measuring=on; $('btnMeasure').setAttribute('aria-pressed',on);
   view.classList.toggle('measuring',on);
+  clearHover();
   if(on){$('spanel').classList.remove('on'); select(null);} else clearMeasure();
   updatePanel();
 }
@@ -636,11 +719,11 @@ function clearMeasure(){
   overlay.innerHTML=''; updatePanel(); needsRender=true;
 }
 function clearAll(){clearMeasure(); select(null);}
-function fatLines(points,mat){
+function fatLines(points,mat,list){
   var arr=[]; for(var i=0;i<points.length;i+=2)arr.push(points[i].x,points[i].y,points[i].z,points[i+1].x,points[i+1].y,points[i+1].z);
   var g=new THREE.LineSegmentsGeometry(); g.setPositions(arr);
   var l=new THREE.LineSegments2(g,mat); l.renderOrder=999; l.computeLineDistances&&l.computeLineDistances();
-  scene.add(l); state.mObjs.push(l); return l;
+  scene.add(l); (list||state.mObjs).push(l); return l;
 }
 function polySegs(P,closed){var out=[]; for(var i=1;i<P.length;i++)out.push(P[i-1],P[i]); if(closed&&P.length>2)out.push(P[P.length-1],P[0]); return out;}
 function anchor(e){return e.type==='point'?e.p:e.type==='arc'?e.c:null;}
@@ -661,6 +744,7 @@ function compute(){
     if(e.type==='point'){r.title=e.snapped?'Corner':'Point on face'; r.big=''; r.rows=[['X',fmt(e.p.x)],['Y',fmt(e.p.y)],['Z',fmt(e.p.z)]]; r.hint='Pick a second item to measure between them.';}
     else if(e.type==='line'){r.title='Edge (straight)'; r.big=fmt(e.length); r.rows=[['Length',fmt(e.length)]]; r.dim=[e.a,e.b]; r.label=fmt(e.length);}
     else if(e.type==='arc'){r.title=e.closed?'Edge (circle)':'Edge (arc)'; r.big='Ø '+fmt(2*e.r); r.rows=[['Diameter',fmt(2*e.r)],['Radius',fmt(e.r)],[e.closed?'Circumference':'Arc length',fmt(e.length)]]; r.label='Ø '+fmt(2*e.r);}
+    else if(e.type==='face'){r.title=e.planar?'Face (flat)':'Face (curved)'; r.big=fmtArea(e.area); r.rows=[['Area',fmtArea(e.area)],['Perimeter',fmt(e.perim)]]; r.label=fmtArea(e.area);}
     else {r.title='Edge (curve)'; r.big=fmt(e.length); r.rows=[['Length',fmt(e.length)]]; r.label=fmt(e.length);}
     return r;
   }
@@ -687,8 +771,39 @@ function compute(){
     }
     return r;
   }
-  var A=pa?[pa]:a.pts,B=pb?[pb]:b.pts,nn=nearestSets(A,B);
+  var fa=a.type==='face'?a:null, fb=b.type==='face'?b:null;
+  if(fa&&fb&&fa.planar&&fb.planar){
+    var fang=Math.acos(Math.min(1,Math.abs(fa.n.dot(fb.n))));
+    if(fang<0.5*Math.PI/180){
+      var gap=fb.c.clone().sub(fa.c).dot(fb.n), foot=fa.c.clone().addScaledVector(fb.n,gap);
+      r.title='Parallel faces'; r.big=fmt(Math.abs(gap)); r.rows=[['Distance',fmt(Math.abs(gap))],['Angle','0.00°']]; r.dim=[fa.c,foot]; r.label=fmt(Math.abs(gap));
+    }else{r.title='Two faces'; r.big=fmtA(fang); r.rows=[['Angle',fmtA(fang)]]; r.label=fmtA(fang); r.labelAt=fa.c.clone().add(fb.c).multiplyScalar(0.5);}
+    return r;
+  }
+  var pf=(fa&&fa.planar)?fa:((fb&&fb.planar)?fb:null), other=pf===a?b:a;
+  if(pf){
+    var op=anchor(other);
+    if(op){
+      var sd=op.clone().sub(pf.c).dot(pf.n);
+      r.title=other.type==='arc'?'Centre to face':'Point to face'; r.big=fmt(Math.abs(sd)); r.rows=[['Normal distance',fmt(Math.abs(sd))]];
+      r.dim=[op,op.clone().addScaledVector(pf.n,-sd)]; r.label=fmt(Math.abs(sd)); return r;
+    }
+    if(other.type==='line'){
+      var lu=other.b.clone().sub(other.a).normalize(), la=Math.asin(Math.min(1,Math.abs(lu.dot(pf.n))));
+      if(la<0.5*Math.PI/180){
+        var lm=other.a.clone().add(other.b).multiplyScalar(0.5), ld=lm.clone().sub(pf.c).dot(pf.n);
+        r.title='Edge parallel to face'; r.big=fmt(Math.abs(ld)); r.rows=[['Distance',fmt(Math.abs(ld))],['Angle','0.00°']]; r.dim=[lm,lm.clone().addScaledVector(pf.n,-ld)]; r.label=fmt(Math.abs(ld));
+      }else{r.title='Edge and face'; r.big=fmtA(la); r.rows=[['Angle',fmtA(la)]]; r.label=fmtA(la); r.labelAt=other.a.clone().add(other.b).multiplyScalar(0.5);}
+      return r;
+    }
+  }
+  function samplePts(x){
+    if(x.type!=='line')return x.pts;
+    var out=[]; for(var i=0;i<=24;i++)out.push(x.a.clone().lerp(x.b,i/24)); return out;
+  }
+  var A=pa?[pa]:samplePts(a),B=pb?[pb]:samplePts(b),nn=nearestSets(A,B);
   r.title='Minimum distance'; r.big=fmt(nn.d); r.rows=[['Distance',fmt(nn.d)]]; r.dim=[nn.p,nn.q]; r.label=fmt(nn.d);
+  if(fa||fb||a.type==='curve'||b.type==='curve')r.hint='Approximate: measured between points on the curved shapes.';
   return r;
 }
 function addEnt(e){
@@ -700,12 +815,13 @@ function redrawMeasure(){
   overlay.innerHTML=''; state.marks=[];
   state.ents.forEach(function(e){
     if(e.type==='point')mark(e.p,e.snapped?'dot snap':'dot');
+    else if(e.type==='face')faceOverlay(e,faceSelMat,state.mObjs);
     else{fatLines(polySegs(e.pts,e.closed),fatSel); if(e.type==='arc')mark(e.c,'dot ctr');}
   });
   var r=state.ents.length?compute():null;
   state.dim=null;
   if(r&&r.dim){if(state.ents.length===2||state.ents[0].type!=='line')fatLines(r.dim,fatDim); state.dim=r.dim;}
-  if(r&&r.label){var lb=document.createElement('div'); lb.className='dim'; lb.textContent=r.label; overlay.appendChild(lb); state.labelEl=lb; state.labelAt=r.dim?r.dim[0].clone().add(r.dim[1]).multiplyScalar(0.5):(state.ents[0].c||state.ents[0].pts[Math.floor(state.ents[0].pts.length/2)]);}
+  if(r&&r.label){var lb=document.createElement('div'); lb.className='dim'; lb.textContent=r.label; overlay.appendChild(lb); state.labelEl=lb; state.labelAt=r.labelAt||(r.dim?r.dim[0].clone().add(r.dim[1]).multiplyScalar(0.5):(state.ents[0].c||state.ents[0].pts[Math.floor(state.ents[0].pts.length/2)]));}
   else state.labelEl=null;
   updatePanel(r); needsRender=true;
 }
@@ -714,7 +830,7 @@ function updatePanel(r){
   var mp=$('mpanel');
   if(!state.measuring){mp.classList.remove('on');return;}
   mp.classList.add('on');
-  if(!state.ents.length){mp.innerHTML='<h2>Measure</h2><p class="hint">Click a corner, an edge or a face. Pick two items to measure between them. Esc clears.</p>'; return;}
+  if(!state.ents.length){mp.innerHTML='<h2>Measure</h2><p class="hint">Move over the model and corners, edges and faces light up. Click to pick one, or pick two to measure between them. Esc clears.</p>'; return;}
   r=r||compute();
   var html='<h2>'+r.title+'</h2>';
   if(r.big)html+='<div class="big">'+r.big+'</div>';
@@ -726,6 +842,8 @@ function updatePanel(r){
 function updateOverlay(){
   var rect=rectOf();
   if(state.comAt){var cs=toScreen(state.comAt,rect); comEl.style.left=(cs.x-rect.left)+'px'; comEl.style.top=(cs.y-rect.top)+'px'; comEl.style.display=cs.z>1?'none':'';}
+  if(state.pivotAt){var ps=toScreen(state.pivotAt,rect); pivotEl.style.left=(ps.x-rect.left)+'px'; pivotEl.style.top=(ps.y-rect.top)+'px';}
+  if(hover&&hover.el&&hover.pt){var hs=toScreen(hover.pt,rect); hover.el.style.left=(hs.x-rect.left)+'px'; hover.el.style.top=(hs.y-rect.top)+'px';}
   if(!state.marks||!state.measuring)return;
   state.marks.forEach(function(m){var s=toScreen(m.p,rect); m.el.style.left=(s.x-rect.left)+'px'; m.el.style.top=(s.y-rect.top)+'px'; m.el.style.display=s.z>1?'none':'';});
   if(state.labelEl&&state.labelAt){var s=toScreen(state.labelAt,rect); state.labelEl.style.left=(s.x-rect.left)+'px'; state.labelEl.style.top=(s.y-rect.top-18)+'px'; state.labelEl.style.display=s.z>1?'none':'';}
@@ -733,14 +851,28 @@ function updateOverlay(){
 $('selUnits').onchange=function(){state.units=this.value; if(state.ents.length)redrawMeasure(); else updatePanel(); updateMass();};
 
 // ---------- clicks & keys ----------
-var down=null, band=null;
+var down=null, band=null, rot=null;
+function endRotate(){if(!rot)return; try{renderer.domElement.releasePointerCapture(rot.id);}catch(err){} rot=null; state.pivotAt=null; pivotEl.style.display='none'; needsRender=true;}
+renderer.domElement.addEventListener('mousedown',function(e){if(e.button===1)e.preventDefault();});
+renderer.domElement.addEventListener('auxclick',function(e){e.preventDefault();});
+renderer.domElement.addEventListener('pointerleave',function(){if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
 function endBand(){if(band){band.remove(); band=null;}}
 renderer.domElement.addEventListener('pointerdown',function(e){
+  // Middle-drag (or Alt + left-drag) rotates about the point on the model under the pointer.
+  if(e.pointerType==='mouse'&&state.meshes.length&&!e.ctrlKey&&!e.metaKey&&((e.button===1&&!e.shiftKey)||(e.button===0&&e.altKey))){
+    var ph=rayHit(e.clientX,e.clientY);
+    rot={id:e.pointerId,x:e.clientX,y:e.clientY,pivot:ph?ph.point.clone():controls.target.clone()};
+    state.pivotAt=ph?rot.pivot:null; pivotEl.style.display=ph?'':'none';
+    try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}
+    clearHover(); down=null; e.preventDefault(); needsRender=true; return;
+  }
   down={x:e.clientX,y:e.clientY,t:performance.now(),b:e.button,box:false,id:e.pointerId,
     canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&state.meshes.length>0};
   if(down.canBox){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
 });
 renderer.domElement.addEventListener('pointermove',function(e){
+  if(rot){rotateAbout(rot.pivot,e.clientX-rot.x,e.clientY-rot.y); rot.x=e.clientX; rot.y=e.clientY; return;}
+  if(state.measuring&&!down&&e.buttons===0&&e.pointerType==='mouse')queueHover(e.clientX,e.clientY);
   if(!down||!down.canBox)return;
   if(!down.box&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>5){down.box=true; band=document.createElement('div'); band.className='band'; hud.appendChild(band);}
   if(down.box){
@@ -750,8 +882,9 @@ renderer.domElement.addEventListener('pointermove',function(e){
     band.classList.toggle('crossing',e.clientX<down.x);
   }
 });
-renderer.domElement.addEventListener('pointercancel',function(){down=null; endBand();});
+renderer.domElement.addEventListener('pointercancel',function(){down=null; endBand(); endRotate();});
 renderer.domElement.addEventListener('pointerup',function(e){
+  if(rot){endRotate(); return;}
   if(!down)return;
   var d=down; down=null;
   try{renderer.domElement.releasePointerCapture(d.id);}catch(err){}
@@ -764,7 +897,7 @@ renderer.domElement.addEventListener('pointerup',function(e){
   }
   var moved=Math.hypot(e.clientX-d.x,e.clientY-d.y),dt=performance.now()-d.t;
   if(moved>5||dt>600||d.b!==0)return;
-  if(state.measuring){var m=measurePick(e.clientX,e.clientY); if(m)addEnt(m); return;}
+  if(state.measuring){var m=measurePick(e.clientX,e.clientY); if(m){if(m.type==='face')m=faceEntity(m.mesh,m.shell); clearHover(); addEnt(m);} return;}
   var hit=rayHit(e.clientX,e.clientY), add=e.shiftKey||e.ctrlKey||e.metaKey;
   if(hit){var n=hit.object.userData.node; if(add)toggleSelect(n); else select(n);}
   else if(!add)select(null);
@@ -807,5 +940,5 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostnam
   window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
 }
 $('btnTree').onclick=function(){var a=$('aside'),o=!a.classList.contains('open'); a.classList.toggle('open',o); this.setAttribute('aria-expanded',o);};
-window.__edv={boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();

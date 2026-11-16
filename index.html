@@ -82,7 +82,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .dot{position:absolute;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:var(--measure);border:2px solid #fff;box-shadow:0 0 0 1px var(--measure)}
 .dot.snap{background:#fff;border-color:var(--measure);border-radius:2px;transform:rotate(45deg)}
 .dim{position:absolute;transform:translate(-50%,-50%);background:var(--measure);color:#fff;padding:3px 9px;border-radius:999px;font-weight:600;font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.panel{position:absolute;left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:220px;max-width:calc(100% - 24px);display:none;font-variant-numeric:tabular-nums}
+.panel{position:absolute;left:12px;bottom:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:220px;max-width:min(440px,calc(100% - 24px));display:none;font-variant-numeric:tabular-nums}
 .panel.on{display:block}
 .panel h2{font-size:13px;margin:0 0 6px;font-weight:600}
 .panel dl{display:grid;grid-template-columns:auto 1fr;gap:2px 14px;margin:0}
@@ -105,6 +105,8 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .props .hint{color:var(--muted);font-size:12px;margin:8px 0 0}
 .props .big{font-size:20px;font-weight:600}
 .props select{width:100%}
+.pivot{position:absolute;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 25%,transparent);box-shadow:0 0 0 1.5px #fff}
+.dot.hov{opacity:.85;box-shadow:0 0 0 5px color-mix(in srgb,var(--measure) 28%,transparent)}
 .band{position:absolute;border:1.5px solid var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);border-radius:2px}
 .band.crossing{border-style:dashed}
 .com{position:absolute;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;border:2px solid #111;box-shadow:0 0 0 2px #fff;background:conic-gradient(#111 0 25%,#fff 0 50%,#111 0 75%,#fff 0)}
@@ -130,7 +132,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 6)</small></div>
+    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 7)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <button class="btn primary" id="btnOpen">Open file</button>
@@ -182,12 +184,12 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         <dl>
           <dt>Select</dt><dd>Click a part. Shift + click adds or removes parts. Drag a box left to right to select parts fully inside it, or right to left to select everything it touches. Shift + drag adds to the selection.</dd>
           <dt>Hide</dt><dd>H hides the selected parts. Show all brings them back.</dd>
-          <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad</dd>
+          <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad. Start the drag on the model and it turns about that point.</dd>
           <dt>Pan</dt><dd>Ctrl + drag, or right-drag</dd>
           <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + middle-drag also zooms.</dd>
           <dt>Fit</dt><dd>F</dd>
           <dt>Projection</dt><dd>Orthographic (SolidWorks default) or Perspective, from the menu in the toolbar</dd>
-          <dt>Measure</dt><dd>M, then click corners, edges or faces. Two picks give the distance or angle between them.</dd>
+          <dt>Measure</dt><dd>M, then move over the model: corners, edges and faces light up before you click. Two picks give the distance or angle between them.</dd>
           <dt>Mass</dt><dd>Shows the mass properties saved in the file for the whole model, and volume with an estimated mass for selected parts.</dd>
           <dt>Clear</dt><dd>Esc clears every selection. Press it again to leave Measure.</dd>
           <dt>Views</dt><dd>Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app)</dd>
@@ -200,13 +202,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     </section>
   </main>
 </div>
-<script src="three.min.js?v=6"></script>
-<script src="OrbitControls.js?v=6"></script>
-<script src="LineSegmentsGeometry.js?v=6"></script>
-<script src="LineMaterial.js?v=6"></script>
-<script src="LineSegments2.js?v=6"></script>
-<script src="fflate.js?v=6"></script>
-<script src="easm-core.js?v=6"></script>
-<script src="app.js?v=6"></script>
+<script src="three.min.js?v=7"></script>
+<script src="OrbitControls.js?v=7"></script>
+<script src="LineSegmentsGeometry.js?v=7"></script>
+<script src="LineMaterial.js?v=7"></script>
+<script src="LineSegments2.js?v=7"></script>
+<script src="fflate.js?v=7"></script>
+<script src="easm-core.js?v=7"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
