@@ -225,8 +225,20 @@ var FMT = (function () {
       (n.children || []).forEach(function (c, i) { nd.children.push(conv(c, 'Component ' + (i + 1))); });
       var ms = n.meshes || [];
       if (ms.length === 1 && !nd.children.length) nd.bodies.push(body(ms[0]));
-      else ms.forEach(function (mi, i) { var b = body(mi); nd.children.push({ name: b.name || ('Body ' + (i + 1)), children: [], bodies: [b] }); });
+      else ms.forEach(function (mi, i) { var b = body(mi); nd.children.push({ name: niceName(b), children: [], bodies: [b] }); });
       return nd;
+    }
+    // Some exporters only name assemblies and call every solid "SOLID". Name those by shape instead,
+    // so identical parts share a name and count correctly in the parts list.
+    var shapes = new Map();
+    function niceName(b) {
+      if (b.name && !/^\s*(solid|body|shell|part|mesh|open cascade.*)?\s*\d*\s*$/i.test(b.name)) return b.name;
+      var p = b.pos, mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+      for (var i = 0; i < p.length; i += 3) for (var k = 0; k < 3; k++) { if (p[i + k] < mn[k]) mn[k] = p[i + k]; if (p[i + k] > mx[k]) mx[k] = p[i + k]; }
+      var ext = [0, 1, 2].map(function (k) { return Math.round((mx[k] - mn[k]) * 1e5); }).sort(function (x, y) { return x - y; });
+      var sig = b.idx.length + '_' + ext.join('_');
+      if (!shapes.has(sig)) shapes.set(sig, 'Unnamed part ' + (shapes.size + 1));
+      return shapes.get(sig);
     }
     var root = conv(res.root, baseName(name));
     while (!root.bodies.length && root.children.length === 1 && root.children[0].children.length) root = root.children[0]; // skip empty wrappers
