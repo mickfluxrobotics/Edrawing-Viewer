@@ -92,8 +92,12 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .panel .acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .panel .acts .btn{padding:4px 9px;font-size:13px}
 .warn{position:absolute;right:12px;top:12px;max-width:min(360px,calc(100% - 24px));background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--measure);border-radius:8px;padding:8px 10px;font-size:13px;display:none}
-.warn.on{display:block}
+.warn.on{display:block;cursor:pointer}
 .stats{position:absolute;right:12px;bottom:12px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.stats .opts label{display:inline-flex;align-items:center;gap:4px;margin-left:8px}
+.stats select{font-size:12px;padding:1px 4px;border-radius:5px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink)}
+.view.two-d{background:#1b2126}
+.view.two-d .stats{color:#9aa7b1}
 .only-narrow{display:none}
 .props{position:absolute;left:12px;top:12px;z-index:3;width:min(300px,calc(100% - 24px));max-height:calc(100% - 150px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:none;font-variant-numeric:tabular-nums}
 .props.on{display:block}
@@ -132,7 +136,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand">eDrawings Viewer<small id="title">Opens .easm and .eprt files on this device (version 8)</small></div>
+    <div class="brand">eDrawings Viewer<small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 9)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <button class="btn primary" id="btnOpen">Open file</button>
@@ -150,7 +154,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       </select>
       <button class="btn" id="btnHelp" aria-expanded="false" aria-controls="help">Controls</button>
     </div>
-    <input type="file" id="file" accept=".easm,.eprt,.EASM,.EPRT" hidden>
+    <input type="file" id="file" accept=".easm,.eprt,.step,.stp,.stl,.3mf,.dxf,.dwg,.EASM,.EPRT,.STEP,.STP,.STL,.3MF,.DXF,.DWG" hidden>
   </header>
   <main>
     <aside id="aside" aria-label="Assembly tree">
@@ -167,8 +171,8 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     <section class="view" id="view">
       <div class="empty" id="empty">
         <div class="empty-card">
-          <h1>Open an eDrawings file</h1>
-          <p>Pick an .easm assembly or .eprt part to view it in 3D, hide parts from the tree and take measurements. The file is read on this device and never uploaded.</p>
+          <h1>Open a CAD file</h1>
+          <p>Open eDrawings (.easm, .eprt), STEP, STL and 3MF models in 3D, or DXF and DWG drawings in 2D. Hide parts from the tree and take measurements. Files are read on this device and never uploaded.</p>
           <button class="btn primary" id="btnOpen2">Open file</button>
           <div class="drop">Or drop the file here.</div>
         </div>
@@ -192,7 +196,9 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Display</dt><dd>The display menu switches between Shaded with edges, Shaded, Hidden lines removed and Wireframe. Wireframe shows every edge, including the ones behind.</dd>
           <dt>Projection</dt><dd>Orthographic (SolidWorks default) or Perspective, from the menu in the toolbar</dd>
           <dt>Measure</dt><dd>M, then move over the model: corners, edges and faces light up before you click. Two picks give the distance or angle between them.</dd>
-          <dt>Mass</dt><dd>Shows the mass properties saved in the file for the whole model, and volume with an estimated mass for selected parts.</dd>
+          <dt>Mass</dt><dd>Shows the mass properties saved in an eDrawings file for the whole model, and volume with an estimated mass for selected parts. For STEP, STL and 3MF everything is estimated from the geometry.</dd>
+          <dt>File types</dt><dd>eDrawings (.easm, .eprt), STEP (.step, .stp), STL and 3MF open in 3D. STEP files are converted on this device first, which can take a while for big assemblies. STL has no units, so pick them with File units in the bottom-right corner. If a model lies on its back, switch Up between Z and Y there too.</dd>
+          <dt>Drawings</dt><dd>DXF and DWG open flat, in 2D. The tree lists layers. Click, Shift + click or drag a box to select lines, arcs and text, then H hides them. Middle-drag pans and scroll zooms. In Measure, ends of lines snap and you can pick lines, arcs and circles. Properties shows the size and total line length (the cut length of a flat pattern). DWG files are converted to DXF first; AutoCAD R13 to 2018 are supported.</dd>
           <dt>Clear</dt><dd>Esc clears every selection. Press it again to leave Measure.</dd>
           <dt>Views</dt><dd>Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app)</dd>
         </dl>
@@ -204,13 +210,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
     </section>
   </main>
 </div>
-<script src="three.min.js?v=8"></script>
-<script src="OrbitControls.js?v=8"></script>
-<script src="LineSegmentsGeometry.js?v=8"></script>
-<script src="LineMaterial.js?v=8"></script>
-<script src="LineSegments2.js?v=8"></script>
-<script src="fflate.js?v=8"></script>
-<script src="easm-core.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="three.min.js?v=9"></script>
+<script src="OrbitControls.js?v=9"></script>
+<script src="LineSegmentsGeometry.js?v=9"></script>
+<script src="LineMaterial.js?v=9"></script>
+<script src="LineSegments2.js?v=9"></script>
+<script src="fflate.js?v=9"></script>
+<script src="easm-core.js?v=9"></script>
+<script src="formats.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

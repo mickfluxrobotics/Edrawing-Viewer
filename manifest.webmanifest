@@ -1,7 +1,7 @@
 {
   "name": "eDrawings Viewer",
   "short_name": "eDrawings",
-  "description": "View SolidWorks eDrawings .easm files, hide parts and take measurements. Files stay on this device.",
+  "description": "View eDrawings, STEP, STL and 3MF models and DXF or DWG drawings. Hide parts and take measurements. Files stay on this device.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -35,6 +35,22 @@
         ],
         "application/vnd.edrawings.eprt": [
           ".eprt"
+        ],
+        "model/step": [
+          ".step",
+          ".stp"
+        ],
+        "model/stl": [
+          ".stl"
+        ],
+        "model/3mf": [
+          ".3mf"
+        ],
+        "image/vnd.dxf": [
+          ".dxf"
+        ],
+        "image/vnd.dwg": [
+          ".dwg"
         ]
       },
       "icons": [

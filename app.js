@@ -28,6 +28,11 @@ controls.mouseButtons={LEFT:-1,MIDDLE:THREE.MOUSE.ROTATE,RIGHT:THREE.MOUSE.PAN};
 view.addEventListener('pointerdown',function(e){
   if(e.pointerType!=='mouse')return;
   var pan=e.ctrlKey||e.metaKey;
+  if(state.is2d){   // drawings: middle-drag pans, Ctrl/Alt + left-drag pans, Shift + middle-drag zooms
+    controls.mouseButtons.LEFT=(pan||e.altKey)?THREE.MOUSE.PAN:-1;
+    controls.mouseButtons.MIDDLE=e.shiftKey?THREE.MOUSE.DOLLY:THREE.MOUSE.PAN;
+    return;
+  }
   // OrbitControls turns a rotate drag into a pan when Ctrl/Cmd is held, so ROTATE covers both.
   controls.mouseButtons.LEFT=pan?THREE.MOUSE.ROTATE:-1;
   controls.mouseButtons.MIDDLE=pan?THREE.MOUSE.ROTATE:(e.shiftKey?THREE.MOUSE.DOLLY:-1);
@@ -104,10 +109,11 @@ var selMat=new THREE.MeshPhongMaterial({color:new THREE.Color(css('--accent')||'
 var fatSel=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:4,depthTest:false,transparent:true});
 var fatDim=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:2,depthTest:false,transparent:true,dashed:false});
 var fatHover=new THREE.LineMaterial({color:new THREE.Color(css('--measure')||'#C8246F').getHex(),linewidth:5,depthTest:false,transparent:true,opacity:0.55});
+var fatSel2d=new THREE.LineMaterial({color:new THREE.Color(css('--accent')||'#2463D9').getHex(),linewidth:3,depthTest:false,transparent:true});
 var faceSelMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.5,side:THREE.DoubleSide,depthWrite:false});
 var faceHoverMat=new THREE.MeshBasicMaterial({color:new THREE.Color(css('--measure')||'#C8246F'),transparent:true,opacity:0.28,side:THREE.DoubleSide,depthWrite:false});
 function refreshThemeColors(){
-  edgeMat.color.set(css('--edge')||'#27313A'); selMat.color.set(css('--accent')||'#2463D9'); selEdgeMat.color.set(css('--accent')||'#2463D9');
+  edgeMat.color.set(css('--edge')||'#27313A'); selMat.color.set(css('--accent')||'#2463D9'); selEdgeMat.color.set(css('--accent')||'#2463D9'); fatSel2d.color.set(css('--accent')||'#2463D9');
   [fatSel,fatDim,fatHover,faceSelMat,faceHoverMat].forEach(function(m){m.color.set(css('--measure')||'#C8246F');}); needsRender=true;
 }
 if(window.matchMedia){var mq=matchMedia('(prefers-color-scheme: dark)'); (mq.addEventListener?mq.addEventListener('change',refreshThemeColors):mq.addListener(refreshThemeColors));}
@@ -120,6 +126,7 @@ var selEdgeMat=new THREE.LineBasicMaterial({color:new THREE.Color(css('--accent'
 var displayMode='shadedEdges'; try{displayMode=localStorage.getItem('edv.display')||'shadedEdges';}catch(e){}
 if(['shadedEdges','shaded','hlr','wire'].indexOf(displayMode)<0)displayMode='shadedEdges';
 function styleMesh(m){
+  if(m.userData.is2d)return;
   var lines=displayMode==='wire'||displayMode==='hlr', sel=!!m.userData.sel;
   m.material=displayMode==='wire'?hiddenMat:(displayMode==='hlr'?hlrMat:(sel?selMat:m.userData.base));
   var ed=m.userData.edges;
@@ -130,7 +137,7 @@ function setDisplay(mode){
   edgeMat.opacity=(mode==='wire'||mode==='hlr')?0.9:0.55;
   state.meshes.forEach(styleMesh); needsRender=true;
 }
-var state={model:null,root:null,meshes:[],measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null,pivotAt:null};
+var state={kind:'easm',is2d:false,sel2d:new Set(),up:'y',unitScale:1,unitless:false,fileKind:'',model:null,root:null,meshes:[],measuring:false,ents:[],sel:[],radius:1,units:'mm',mObjs:[],massOn:false,comAt:null,pivotAt:null};
 var matCache=new Map();
 function matFor(rgb){
   var k=rgb.join(','), m=matCache.get(k);
@@ -140,7 +147,7 @@ function matFor(rgb){
 function resize(){
   var w=view.clientWidth,h=view.clientHeight; if(!w||!h)return;
   renderer.setSize(w,h,false); persp.aspect=w/h; persp.updateProjectionMatrix(); setOrthoFrustum();
-  fatSel.resolution.set(w,h); fatDim.resolution.set(w,h); fatHover.resolution.set(w,h); needsRender=true;
+  fatSel.resolution.set(w,h); fatDim.resolution.set(w,h); fatHover.resolution.set(w,h); fatSel2d.resolution.set(w,h); needsRender=true;
 }
 window.addEventListener('resize',resize);
 if(window.ResizeObserver)new ResizeObserver(resize).observe(view);
@@ -159,29 +166,77 @@ function busy(on,text,frac){
   if(frac!=null)$('busyBar').style.width=Math.round(frac*100)+'%';
 }
 var tick=function(){return new Promise(function(r){setTimeout(r,16);});};
-function showWarn(msg){var w=$('warn'); w.textContent=msg||''; w.classList.toggle('on',!!msg);}
+function showWarn(msg){var w=$('warn'); w.textContent=msg||''; w.title=msg?'Click to dismiss':''; w.classList.toggle('on',!!msg);}
+$('warn').addEventListener('click',function(){this.classList.remove('on');});
 async function openFile(file){
   if(!file)return;
+  var kind=FMT.kind(file.name);
+  if(!kind){showWarn('This viewer opens .easm, .eprt, .step, .stp, .stl, .3mf, .dxf and .dwg files.'); return;}
   showWarn(''); $('preview').style.display='none';
   busy(true,'Reading '+file.name+'…',0.02); await tick();
   try{
-    var buf=new Uint8Array(await file.arrayBuffer());
-    busy(true,'Unpacking…',0.08); await tick();
-    var u=EASM.unpack(buf);
-    if(u.preview){var bin=''; for(var k=0;k<u.preview.length;k+=8192)bin+=String.fromCharCode.apply(null,u.preview.subarray(k,k+8192)); var img=$('preview'); img.src='data:image/jpeg;base64,'+btoa(bin); img.style.display='block';}
-    busy(true,'Decompressing model data…',0.15); await tick();
-    var raw=EASM.inflateModel(u.eModel);
-    busy(true,'Reading model structure…',0.35); await tick();
-    var model=EASM.parse(raw);
-    if(!model.shellCount)throw new Error('No 3D surfaces were found in this file. Drawings (.edrw) aren’t supported.');
-    await build(model,file.name);
-    if(model.warnings.length)showWarn(model.warnings[0]+' Some geometry may be missing.');
+    var buf=new Uint8Array(await file.arrayBuffer()), m;
+    if(kind==='easm'){
+      busy(true,'Unpacking…',0.08); await tick();
+      var u=EASM.unpack(buf);
+      if(u.preview){var bin=''; for(var k=0;k<u.preview.length;k+=8192)bin+=String.fromCharCode.apply(null,u.preview.subarray(k,k+8192)); var img=$('preview'); img.src='data:image/jpeg;base64,'+btoa(bin); img.style.display='block';}
+      busy(true,'Decompressing model data…',0.15); await tick();
+      var raw=EASM.inflateModel(u.eModel);
+      busy(true,'Reading model structure…',0.35); await tick();
+      var model=EASM.parse(raw);
+      if(!model.shellCount)throw new Error('No 3D surfaces were found in this file. Drawings (.edrw) aren’t supported.');
+      await build(model,file.name);
+      if(model.warnings.length)showWarn(model.warnings[0]+' Some geometry may be missing.');
+      return;
+    }
+    if(kind==='stl'){busy(true,'Reading triangles…',0.1); await tick(); m=FMT.parseSTL(buf,file.name); m.up=pref('up.stl')||'z';}
+    else if(kind==='3mf'){busy(true,'Unpacking…',0.1); await tick(); m=FMT.parse3MF(buf,file.name); m.up='z';}
+    else if(kind==='step'){var up=FMT.upGuess('step',buf); m=FMT.fromOcct(await readStep(buf),file.name); m.up=up;}
+    else{
+      var text=FMT.decodeText(kind==='dwg'?await convertDwg(buf):buf);
+      busy(true,'Reading drawing…',0.5); await tick();
+      m=FMT.parseDXF(text,file.name);
+      await build2D(m,kind);
+      if(m.warnings.length)showWarn(m.warnings.join(' '));
+      return;
+    }
+    await buildMesh(m,kind);
+    if(m.warnings&&m.warnings.length)showWarn(m.warnings.join(' '));
   }catch(e){console.error(e); showWarn((e&&e.message)?e.message:'This file couldn’t be read.');}
   finally{busy(false);}
+}
+function pref(k){try{return localStorage.getItem('edv.'+k);}catch(e){return null;}}
+function setPref(k,v){try{localStorage.setItem('edv.'+k,v);}catch(e){}}
+// STEP (OpenCascade) and DWG conversion run in workers so the page stays responsive.
+var stepWorker=null, dwgWorker=null;
+function workerJob(make,msg,transfer,label,frac){
+  return new Promise(function(resolve,reject){
+    var w; try{w=make();}catch(err){reject(new Error('This file type needs the viewer opened from its web address, not from a saved copy.')); return;}
+    var t0=performance.now(), iv=setInterval(function(){busy(true,label+' '+Math.round((performance.now()-t0)/1000)+' s',frac);},1000);
+    busy(true,label,frac);
+    w.onmessage=function(ev){clearInterval(iv); if(ev.data&&ev.data.error)reject(new Error(ev.data.error)); else resolve(ev.data);};
+    w.onerror=function(ev){clearInterval(iv); if(ev.preventDefault)ev.preventDefault(); reject(new Error('the converter stopped unexpectedly, possibly because the file is too large for this device'));};
+    w.postMessage(msg,transfer);
+  });
+}
+async function readStep(buf){
+  try{
+    var r=await workerJob(function(){if(!stepWorker)stepWorker=new Worker('step-worker.js'); return stepWorker;},{buffer:buf.buffer,params:{linearUnit:'meter'}},[buf.buffer],'Converting STEP geometry…',0.3);
+    return r.result;
+  }catch(e){if(stepWorker){stepWorker.terminate(); stepWorker=null;} throw new Error('This STEP file couldn’t be converted: '+e.message+'.');}
+}
+async function convertDwg(buf){
+  try{
+    var r=await workerJob(function(){if(!dwgWorker)dwgWorker=new Worker('dwg-worker.js',{type:'module'}); return dwgWorker;},{buffer:buf.buffer},[buf.buffer],'Converting DWG…',0.2);
+    return r.dxf;
+  }catch(e){if(dwgWorker){dwgWorker.terminate(); dwgWorker=null;} throw new Error('This DWG couldn’t be converted ('+e.message+'). DWG files from AutoCAD R13 to 2018 are supported; saving the drawing as DXF usually works.');}
 }
 var geomCache=new Map();
 function clearModel(){
   clearAll(); setMeasuring(false);
+  if(state.is2d)setMode2d(false);
+  d2.ents=[]; d2.layers=[]; d2.grid=null; state.kind='easm'; state.up='y'; state.unitScale=1; state.unitless=false; state.fileKind='';
+  modelRoot.rotation.set(0,0,0); modelRoot.scale.set(1,1,1); modelRoot.updateMatrixWorld(true);
   while(modelRoot.children.length)modelRoot.remove(modelRoot.children[0]);
   geomCache.forEach(function(g){if(g){g.geo.dispose(); if(g.edges)g.edges.dispose();}});
   geomCache.clear(); state.meshes=[]; $('tree').innerHTML='';
@@ -260,17 +315,299 @@ async function build(model,fileName){
     if(g.edges){var ln=new THREE.LineSegments(g.edges,edgeMat); ln.matrixAutoUpdate=false; ln.matrix.copy(jb.M); ln.raycast=function(){}; modelRoot.add(ln); mesh.userData.edges=ln;}
     jb.node.meshes.push(mesh); state.meshes.push(mesh); tris+=g.tris;
   }
-  // A part file with several bodies: list them so each can be hidden.
-  if(!rootNode.children.length&&rootNode.meshes.length>1){
+  finishBuild(rootNode,state.meshes.length.toLocaleString()+' bodies, '+fmtTris(tris)+'<br>Model units: metres');
+}
+function fmtTris(n){return n<10000?n.toLocaleString()+' triangles':n<1e6?Math.round(n/1000).toLocaleString()+'k triangles':(n/1e6).toFixed(1)+'M triangles';}
+function finishBuild(rootNode,statsHtml){
+  // A part with several bodies: list them so each can be hidden.
+  if(!state.is2d&&!rootNode.children.length&&rootNode.meshes.length>1){
     rootNode.meshes.forEach(function(m,k){rootNode.children.push({name:'Body '+(k+1),children:[],meshes:[m],visible:true,parent:rootNode,depth:1}); m.userData.node=rootNode.children[k];});
     rootNode.meshes=[];
   }
-  modelRoot.updateMatrixWorld(true);
+  applyModelTransform();
   renderTree(rootNode); applyVisibility();
   ['btnFit','selView','selProj','selDisplay','btnMeasure','btnMass','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   $('empty').style.display='none';
-  $('stats').innerHTML=state.meshes.length.toLocaleString()+' bodies, '+(tris/1e6).toFixed(tris<1e5?2:1)+'M triangles<br>Model units: metres, viewer version 8';
-  state.radius=1; setView('iso'); updateMass();
+  renderStats(statsHtml);
+  state.radius=1;
+  if(state.is2d){fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else setView('iso');
+  updateMass();
+}
+var UNIT_SCALE={mm:0.001,cm:0.01,m:1,in:0.0254};
+function applyModelTransform(){
+  modelRoot.scale.setScalar(state.unitScale);
+  modelRoot.rotation.set(state.up==='z'&&!state.is2d?-Math.PI/2:0,0,0);
+  modelRoot.updateMatrixWorld(true);
+}
+// Read-outs use the model's own axes: Z-up files are turned to Y-up for viewing.
+function dispVec(v){return (state.up==='z'&&!state.is2d)?new THREE.Vector3(v.x,-v.z,v.y):v;}
+function renderStats(html){
+  var st=$('stats'), extra='';
+  if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
+  if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
+  st.innerHTML=html+'<br>'+(extra?'<span class="opts">'+extra+'</span> ':'')+'viewer version 9';
+  var fu=$('selFileUnit');
+  if(fu)fu.onchange=function(){state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
+  var su=$('selUp');
+  if(su)su.onchange=function(){state.up=this.value; if(state.fileKind==='stl')setPref('up.stl',this.value); clearMeasure(); applyModelTransform(); setView('iso'); updateMass();};
+}
+
+// ---------- STL, 3MF and STEP ----------
+function meshGeometry(b){
+  if(geomCache.has(b.key))return geomCache.get(b.key);
+  var pos=b.pos, idx=b.idx, ss=b.shellStart, normals=b.normals||null;
+  if(!idx.length){geomCache.set(b.key,null); return null;}
+  if(!ss){var sg=FMT.segmentFaces(pos,idx,30); pos=sg.pos; idx=sg.idx; ss=sg.shellStart; normals=null;}
+  var nv=pos.length/3, IA=nv>65535?Uint32Array:Uint16Array, edges=[], eshell=[];
+  for(var f=0;f+1<ss.length;f++){
+    if(ss[f+1]<=ss[f])continue;
+    var be=EASM.boundaryEdges(idx.subarray(ss[f],ss[f+1]),nv);
+    for(var j=0;j<be.length;j+=2){edges.push(be[j],be[j+1]); eshell.push(f);}
+  }
+  var geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos instanceof Float32Array?pos:new Float32Array(pos),3));
+  geo.setIndex(new THREE.BufferAttribute((IA===Uint32Array&&idx instanceof Uint32Array)?idx:new IA(idx),1));
+  if(normals&&normals.length===pos.length)geo.setAttribute('normal',new THREE.BufferAttribute(normals,3)); else geo.computeVertexNormals();
+  geo.computeBoundingBox(); geo.computeBoundingSphere();
+  var edgeIdx=new IA(edges), eg=null;
+  if(edges.length){eg=new THREE.BufferGeometry(); eg.setAttribute('position',geo.getAttribute('position')); eg.setIndex(new THREE.BufferAttribute(edgeIdx,1)); eg.boundingSphere=geo.boundingSphere; eg.boundingBox=geo.boundingBox;}
+  var g={geo:geo,edges:eg,tris:idx.length/3,edgeIdx:edgeIdx,edgeShell:new Int32Array(eshell),shellStart:new Uint32Array(ss),topo:null};
+  geomCache.set(b.key,g);
+  return g;
+}
+async function buildMesh(model,kind){
+  clearModel();
+  state.kind='mesh'; state.fileKind=kind; state.model={massProps:null}; state.up=model.up||'z';
+  state.unitless=!!model.unitless;
+  state.unitScale=model.unitless?(UNIT_SCALE[pref('unit.'+kind)]||model.scale):model.scale;
+  $('title').textContent=model.title;
+  var rootNode={name:model.title,children:[],meshes:[],visible:true,parent:null,depth:0}, jobs=[];
+  state.root=rootNode;
+  (function conv(src,node){
+    src.bodies.forEach(function(b){jobs.push({b:b,node:node});});
+    src.children.forEach(function(c){var ch={name:c.name||'Part',children:[],meshes:[],visible:true,parent:node,depth:node.depth+1}; node.children.push(ch); conv(c,ch);});
+  })(model.root,rootNode);
+  var tris=0;
+  for(var i=0;i<jobs.length;i++){
+    if(i%10===0){busy(true,'Building 3D view… '+i+' of '+jobs.length+' bodies',0.5+0.45*i/jobs.length); await tick();}
+    var jb=jobs[i], g=meshGeometry(jb.b); if(!g)continue;
+    var mesh=new THREE.Mesh(g.geo,matFor(jb.b.color||[176,184,191])), M=localMatrix(jb.b.matrix);
+    mesh.userData.g=g; mesh.userData.node=jb.node; mesh.userData.base=mesh.material;
+    mesh.matrixAutoUpdate=false; mesh.matrix.copy(M);
+    modelRoot.add(mesh);
+    if(g.edges){var ln=new THREE.LineSegments(g.edges,edgeMat); ln.matrixAutoUpdate=false; ln.matrix.copy(M); ln.raycast=function(){}; modelRoot.add(ln); mesh.userData.edges=ln;}
+    jb.node.meshes.push(mesh); state.meshes.push(mesh); tris+=g.tris;
+  }
+  var unitNote=(model.unitless||kind==='step')?'':'Model units: '+({0.001:'mm',0.01:'cm',1:'m',0.0254:'in',0.3048:'ft',0.000001:'µm'}[model.scale]||'file units');
+  finishBuild(rootNode,state.meshes.length.toLocaleString()+' bod'+(state.meshes.length===1?'y':'ies')+', '+fmtTris(tris)+(unitNote?'<br>'+unitNote:''));
+}
+
+// ---------- 2D drawings (DXF, DWG) ----------
+var d2={ents:[],layers:[],grid:null,hidden:null,selObj:null,ox:0,oy:0};
+var INK=[226,230,234];
+function d2Color(c){
+  if(!c)return INK;
+  var l=0.299*c[0]+0.587*c[1]+0.114*c[2];
+  if((c[0]>245&&c[1]>245&&c[2]>245)||l<18)return INK;           // white and black follow the background
+  if(l<80)return [Math.round(c[0]+(255-c[0])*0.45),Math.round(c[1]+(255-c[1])*0.45),Math.round(c[2]+(255-c[2])*0.45)];
+  return c;
+}
+function setMode2d(on){
+  state.is2d=on; view.classList.toggle('two-d',on);
+  controls.enableRotate=!on;
+  controls.touches.ONE=on?THREE.TOUCH.PAN:THREE.TOUCH.ROTATE;
+  ['selView','selProj','selDisplay'].forEach(function(id){$(id).hidden=on;});
+  $('btnMass').textContent=on?'Properties':'Mass';
+  if(on){state.prevProj=camera===ortho?'ortho':'persp'; setProjection('ortho',true); camera.up.set(0,1,0);}
+  else if(state.prevProj==='persp')setProjection('persp',true);
+  if(d2.selObj){scene.remove(d2.selObj); d2.selObj.geometry.dispose(); d2.selObj=null;}
+  state.sel2d=new Set();
+}
+function d2EachSeg(e,f){
+  var p=e.pts,k;
+  if(e.pairs){for(k=0;k+3<p.length;k+=4)f(p[k],p[k+1],p[k+2],p[k+3]); return;}
+  for(k=0;k+3<p.length;k+=2)f(p[k],p[k+1],p[k+2],p[k+3]);
+  if(e.closed&&p.length>=6)f(p[p.length-2],p[p.length-1],p[0],p[1]);
+}
+function d2Rebuild(li){
+  var lay=d2.layers[li], n=0, ox=d2.ox, oy=d2.oy;
+  lay.ents.forEach(function(id){if(d2.hidden[id])return; var e=d2.ents[id]; n+=e.pairs?e.pts.length/4:(e.pts.length/2-1+(e.closed&&e.pts.length>=6?1:0));});
+  var pos=new Float32Array(n*6), col=new Float32Array(n*6), o=0;
+  lay.ents.forEach(function(id){
+    if(d2.hidden[id])return;
+    var e=d2.ents[id], r=e.color[0]/255, g=e.color[1]/255, b=e.color[2]/255;
+    d2EachSeg(e,function(x1,y1,x2,y2){pos[o]=x1-ox;pos[o+1]=y1-oy;pos[o+3]=x2-ox;pos[o+4]=y2-oy; col[o]=r;col[o+1]=g;col[o+2]=b;col[o+3]=r;col[o+4]=g;col[o+5]=b; o+=6;});
+  });
+  var geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3)); geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  geo.computeBoundingBox(); geo.computeBoundingSphere();
+  if(lay.obj.geometry)lay.obj.geometry.dispose();
+  lay.obj.geometry=geo; needsRender=true;
+}
+function d2BuildIndex(){
+  var minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity,segs=0;
+  d2.ents.forEach(function(e){if(e.minx<minx)minx=e.minx; if(e.miny<miny)miny=e.miny; if(e.maxx>maxx)maxx=e.maxx; if(e.maxy>maxy)maxy=e.maxy; segs+=e.pts.length/4;});
+  var G=Math.max(16,Math.min(512,Math.ceil(Math.sqrt(segs/2)))), cw=Math.max((maxx-minx)/G,1e-9), ch=Math.max((maxy-miny)/G,1e-9), cells=new Map();
+  function cx(x){return Math.max(0,Math.min(G-1,Math.floor((x-minx)/cw)));}
+  function cy(y){return Math.max(0,Math.min(G-1,Math.floor((y-miny)/ch)));}
+  d2.ents.forEach(function(e,id){
+    d2EachSeg(e,function(x1,y1,x2,y2){
+      for(var gy=cy(Math.min(y1,y2));gy<=cy(Math.max(y1,y2));gy++)for(var gx=cx(Math.min(x1,x2));gx<=cx(Math.max(x1,x2));gx++){
+        var key=gy*G+gx, l=cells.get(key); if(!l){l=[]; cells.set(key,l);} if(l[l.length-1]!==id)l.push(id);
+      }
+    });
+  });
+  d2.grid={G:G,cells:cells,cx:cx,cy:cy};
+}
+function d2Near(x,y,r){
+  var gr=d2.grid, out=new Set(); if(!gr)return out;
+  for(var gy=gr.cy(y-r);gy<=gr.cy(y+r);gy++)for(var gx=gr.cx(x-r);gx<=gr.cx(x+r);gx++){var l=gr.cells.get(gy*gr.G+gx); if(l)for(var i=0;i<l.length;i++)out.add(l[i]);}
+  return out;
+}
+function d2Visible(id){return !d2.hidden[id]&&d2.layers[d2.ents[id].layer].obj.visible;}
+function d2Local(cx,cy){var w=worldAt(cx,cy); modelRoot.worldToLocal(w); return w;}
+function d2World(x,y){return modelRoot.localToWorld(new THREE.Vector3(x,y,0));}
+function d2Wpp(){return (camera.top-camera.bottom)/camera.zoom/(renderer.domElement.clientHeight||1)/state.unitScale;}
+function segDist(px,py,x1,y1,x2,y2){var vx=x2-x1,vy=y2-y1,l2=vx*vx+vy*vy,t=l2?Math.max(0,Math.min(1,((px-x1)*vx+(py-y1)*vy)/l2)):0; return Math.hypot(x1+vx*t-px,y1+vy*t-py);}
+function d2Pick(cx,cy,px,noText){
+  var L=d2Local(cx,cy), r=px*d2Wpp(), best=r, bid=-1;
+  d2Near(L.x,L.y,r).forEach(function(id){
+    var e=d2.ents[id]; if((noText&&e.text)||!d2Visible(id))return;
+    d2EachSeg(e,function(x1,y1,x2,y2){var dd=segDist(L.x,L.y,x1,y1,x2,y2); if(dd<best){best=dd; bid=id;}});
+  });
+  return bid;
+}
+// Measure in drawings: end points (snap) > lines, arcs and circles.
+function measurePick2d(cx,cy){
+  var L=d2Local(cx,cy), w=d2Wpp(), best=11*w, bp=null, bk=null;
+  d2Near(L.x,L.y,12*w).forEach(function(id){
+    var e=d2.ents[id]; if(e.text||e.closed||!d2Visible(id))return;
+    var p=e.pts;
+    [[p[0],p[1],0],[p[p.length-2],p[p.length-1],1]].forEach(function(q){var dd=Math.hypot(q[0]-L.x,q[1]-L.y); if(dd<best){best=dd; bp=q; bk='p'+id+'_'+q[2];}});
+  });
+  if(bp)return {type:'point',p:d2World(bp[0],bp[1]),snapped:true,key:bk};
+  var id=d2Pick(cx,cy,9,true); if(id<0)return null;
+  var e=d2.ents[id], pts=[];
+  for(var k=0;k+1<e.pts.length;k+=2)pts.push(d2World(e.pts[k],e.pts[k+1]));
+  var c=classify({pts:pts,closed:e.closed}); c.key='e'+id; return c;
+}
+function d2SetSel(ids){
+  state.sel2d=new Set(ids.filter(function(id){return id>=0&&d2Visible(id);}));
+  if(d2.selObj){scene.remove(d2.selObj); d2.selObj.geometry.dispose(); d2.selObj=null;}
+  if(state.sel2d.size){
+    var arr=[];
+    state.sel2d.forEach(function(id){d2EachSeg(d2.ents[id],function(x1,y1,x2,y2){var a=d2World(x1,y1),b=d2World(x2,y2); arr.push(a.x,a.y,0,b.x,b.y,0);});});
+    var g=new THREE.LineSegmentsGeometry(); g.setPositions(arr);
+    d2.selObj=new THREE.LineSegments2(g,fatSel2d); d2.selObj.renderOrder=997; scene.add(d2.selObj);
+  }
+  $('btnHideSel').disabled=!state.sel2d.size; $('btnIsolate').disabled=!state.sel2d.size;
+  d2ShowSelInfo(); updateMass(); needsRender=true;
+}
+function d2EntLength(e){var L=0; if(!e.text)d2EachSeg(e,function(x1,y1,x2,y2){L+=Math.hypot(x2-x1,y2-y1);}); return L*state.unitScale;}
+function d2ShowSelInfo(){
+  var sp=$('spanel'), s=state.sel2d;
+  if(state.measuring||!s.size){sp.classList.remove('on'); return;}
+  var layers=new Set(), len=0;
+  s.forEach(function(id){var e=d2.ents[id]; layers.add(d2.layers[e.layer].name); len+=d2EntLength(e);});
+  sp.innerHTML='';
+  var h=document.createElement('h2'); h.textContent=s.size===1?'1 item selected':s.size.toLocaleString()+' items selected'; sp.appendChild(h);
+  var pp=document.createElement('p'); pp.className='hint';
+  var ln=Array.from(layers);
+  pp.textContent=(len>0?'Length '+fmt(len)+'. ':'')+(ln.length>1?'Layers ':'Layer ')+ln.slice(0,3).join(', ')+(ln.length>3?' and '+(ln.length-3)+' more':'')+'.';
+  sp.appendChild(pp);
+  var acts=document.createElement('div'); acts.className='acts';
+  [['Hide',function(){$('btnHideSel').click();}],['Isolate',function(){$('btnIsolate').click();}],['Zoom to',function(){d2ZoomTo(Array.from(state.sel2d));}]].forEach(function(a){
+    var b=document.createElement('button'); b.className='btn'; b.textContent=a[0]; b.onclick=a[1]; acts.appendChild(b);});
+  sp.appendChild(acts); sp.classList.add('on');
+}
+function d2Bounds(ids){
+  var b={minx:Infinity,miny:Infinity,maxx:-Infinity,maxy:-Infinity};
+  ids.forEach(function(id){var e=d2.ents[id]; if(e.minx<b.minx)b.minx=e.minx; if(e.miny<b.miny)b.miny=e.miny; if(e.maxx>b.maxx)b.maxx=e.maxx; if(e.maxy>b.maxy)b.maxy=e.maxy;});
+  return b;
+}
+function d2ZoomTo(ids){if(ids.length)d2ZoomBox(d2Bounds(ids));}
+function d2Fit(){if(d2.fitBox)d2ZoomBox(d2.fitBox);}
+// "Zoom extents" that ignores a few stray items far from the rest of the drawing.
+function d2FitBox(){
+  var n=d2.ents.length, all=d2Bounds(d2AllVisible());
+  if(n<50)return {box:all,trimmed:false};
+  var x0=[],x1=[],y0=[],y1=[];
+  d2.ents.forEach(function(e,id){if(!d2Visible(id))return; x0.push(e.minx); x1.push(e.maxx); y0.push(e.miny); y1.push(e.maxy);});
+  if(x0.length<50)return {box:all,trimmed:false};
+  [x0,x1,y0,y1].forEach(function(a){a.sort(function(p,q){return p-q;});});
+  var lo=Math.floor(x0.length*0.005), hi=Math.ceil(x0.length*0.995)-1;
+  var b={minx:x0[lo],maxx:x1[hi],miny:y0[lo],maxy:y1[hi]};
+  var trimmed=(b.maxx-b.minx)<(all.maxx-all.minx)*0.2||(b.maxy-b.miny)<(all.maxy-all.miny)*0.2;
+  return {box:trimmed?b:all,trimmed:trimmed};
+}
+function d2ZoomBox(b){
+  var a=d2World(b.minx,b.miny), c2=d2World(b.maxx,b.maxy), c=a.clone().add(c2).multiplyScalar(0.5);
+  var w=Math.max(Math.abs(c2.x-a.x),1e-6), h=Math.max(Math.abs(c2.y-a.y),1e-6), asp=view.clientWidth/Math.max(1,view.clientHeight);
+  ortho.userData.halfH=Math.max(h/2,w/2/asp)*1.15; ortho.zoom=1; setOrthoFrustum();
+  controls.target.copy(c); ortho.position.set(c.x,c.y,state.radius*4+1); camera.up.set(0,1,0);
+  updateClip(); controls.update(); needsRender=true;
+}
+function d2LayerIds(li){return d2.layers[li].ents.filter(d2Visible);}
+function d2AllVisible(){var out=[]; for(var i=0;i<d2.ents.length;i++)if(d2Visible(i))out.push(i); return out;}
+// Box select: left to right takes items fully inside; right to left takes anything the box touches.
+function d2BoxSelect(x0,y0,x1,y1,crossing){
+  var a=d2Local(Math.min(x0,x1),Math.min(y0,y1)), b=d2Local(Math.max(x0,x1),Math.max(y0,y1));
+  var L=Math.min(a.x,b.x),R=Math.max(a.x,b.x),B=Math.min(a.y,b.y),T=Math.max(a.y,b.y), out=[];
+  function inside(x,y){return x>=L&&x<=R&&y>=B&&y<=T;}
+  function hits(x1,y1,x2,y2){
+    if(inside(x1,y1)||inside(x2,y2))return true;
+    var t0=0,t1=1,dx=x2-x1,dy=y2-y1,p=[-dx,dx,-dy,dy],q=[x1-L,R-x1,y1-B,T-y1];
+    for(var i=0;i<4;i++){if(p[i]===0){if(q[i]<0)return false;}else{var t=q[i]/p[i]; if(p[i]<0){if(t>t1)return false; if(t>t0)t0=t;}else{if(t<t0)return false; if(t<t1)t1=t;}}}
+    return true;
+  }
+  for(var id=0;id<d2.ents.length;id++){
+    var e=d2.ents[id]; if(!d2Visible(id)||e.maxx<L||e.minx>R||e.maxy<B||e.miny>T)continue;
+    if(!crossing){if(e.minx>=L&&e.maxx<=R&&e.miny>=B&&e.maxy<=T)out.push(id); continue;}
+    var hit=false; d2EachSeg(e,function(x1,y1,x2,y2){if(!hit&&hits(x1,y1,x2,y2))hit=true;}); if(hit)out.push(id);
+  }
+  return out;
+}
+function d2HideIds(ids){
+  var touched=new Set();
+  ids.forEach(function(id){d2.hidden[id]=1; touched.add(d2.ents[id].layer);});
+  touched.forEach(d2Rebuild);
+}
+async function build2D(model,kind){
+  clearModel();
+  state.kind='2d'; state.fileKind=kind; state.model={massProps:null}; state.unitless=!!model.unitless;
+  state.unitScale=model.unitless?(UNIT_SCALE[pref('unit.'+kind)]||model.scale):model.scale;
+  setMode2d(true);
+  $('title').textContent=model.title;
+  var rootNode={name:model.title,children:[],meshes:[],visible:true,parent:null,depth:0};
+  state.root=rootNode;
+  var minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  model.layers.forEach(function(Ly,li){
+    var node={name:Ly.name,children:[],meshes:[],visible:!Ly.off,parent:rootNode,depth:1,layer:li};
+    rootNode.children.push(node);
+    var lay={name:Ly.name,node:node,ents:[],obj:null}; d2.layers.push(lay);
+    Ly.prims.forEach(function(p){
+      var a=p.pts, ex0=Infinity,ey0=Infinity,ex1=-Infinity,ey1=-Infinity;
+      for(var k=0;k+1<a.length;k+=2){var x=a[k],y=a[k+1]; if(x<ex0)ex0=x; if(x>ex1)ex1=x; if(y<ey0)ey0=y; if(y>ey1)ey1=y;}
+      if(!isFinite(ex0)||!isFinite(ey0)||!isFinite(ex1)||!isFinite(ey1))return;
+      lay.ents.push(d2.ents.length);
+      d2.ents.push({layer:li,pts:a,closed:!!p.closed,pairs:!!p.pairs,text:!!p.text,color:d2Color(p.color||Ly.color),minx:ex0,miny:ey0,maxx:ex1,maxy:ey1});
+      if(ex0<minx)minx=ex0; if(ey0<miny)miny=ey0; if(ex1>maxx)maxx=ex1; if(ey1>maxy)maxy=ey1;
+    });
+  });
+  d2.ox=(minx+maxx)/2; d2.oy=(miny+maxy)/2; d2.hidden=new Uint8Array(d2.ents.length);
+  busy(true,'Drawing '+d2.ents.length.toLocaleString()+' items…',0.8); await tick();
+  d2.layers.forEach(function(lay,li){
+    var obj=new THREE.LineSegments(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({vertexColors:true}));
+    obj.position.set(d2.ox,d2.oy,0); obj.userData.is2d=true; obj.raycast=function(){};
+    lay.obj=obj; lay.node.meshes.push(obj); modelRoot.add(obj); state.meshes.push(obj); d2Rebuild(li);
+  });
+  d2BuildIndex();
+  var fb=d2FitBox(); d2.fitBox=fb.box;
+  if(fb.trimmed)model.warnings.push('A few items sit far away from the rest of the drawing, so Fit shows the main drawing. Zoom out to see them.');
+  var offL=d2.layers.filter(function(l){return !l.node.visible;}).length;
+  if(offL)model.warnings.push(offL+' layer'+(offL>1?'s are':' is')+' switched off in this drawing. Tick '+(offL>1?'them':'it')+' in the tree, or use Show all, to see '+(offL>1?'them':'it')+'.');
+  var unitNote=model.unitless?'':'Drawing units: '+({0.001:'mm',0.01:'cm',1:'m',0.0254:'in',0.3048:'ft',0.1:'dm',0.9144:'yd',0.000001:'µm'}[model.scale]||'file units');
+  finishBuild(rootNode,d2.ents.length.toLocaleString()+' items on '+d2.layers.length+' layer'+(d2.layers.length===1?'':'s')+(unitNote?'<br>'+unitNote:''));
 }
 
 // ---------- visibility & tree ----------
@@ -282,6 +619,7 @@ function applyVisibility(){
     if(n.cb)n.cb.checked=n.visible;
     for(i=0;i<n.children.length;i++)rec(n.children[i],v);
   })(state.root,true);
+  if(state.is2d&&state.sel2d.size)d2SetSel(Array.from(state.sel2d));
   if(state.massOn)updateMass();
   needsRender=true;
 }
@@ -301,7 +639,11 @@ function renderTree(root){
     n.row=row; n.cb=cb; n.kidsEl=kids; n.caret=car; n.wrap=wrap;
     car.onclick=function(){var o=!kids.classList.contains('open'); kids.classList.toggle('open',o); car.setAttribute('aria-expanded',o?'true':'false');};
     cb.onchange=function(){n.visible=cb.checked; applyVisibility();};
-    nm.onclick=function(e){if(e.shiftKey||e.ctrlKey||e.metaKey)toggleSelect(n); else select(n);};
+    nm.onclick=function(e){
+      var add=e.shiftKey||e.ctrlKey||e.metaKey;
+      if(state.is2d){var ids=n.layer!=null?d2LayerIds(n.layer):d2AllVisible(); d2SetSel(add?Array.from(state.sel2d).concat(ids):ids); return;}
+      if(add)toggleSelect(n); else select(n);
+    };
     for(var i=0;i<n.children.length;i++)make(n.children[i],kids);
     parentEl.appendChild(wrap);
   })(root,tree);
@@ -319,13 +661,20 @@ $('search').addEventListener('input',function(){
     return hit||anyKid;
   })(state.root);
 });
-$('btnShowAll').onclick=function(){forEachNode(state.root,function(n){n.visible=true;}); applyVisibility();};
+$('btnShowAll').onclick=function(){forEachNode(state.root,function(n){n.visible=true;}); if(state.is2d&&d2.hidden){d2.hidden.fill(0); d2.layers.forEach(function(l,i){d2Rebuild(i);});} applyVisibility();};
 $('btnHideSel').onclick=function(){
+  if(state.is2d){if(state.sel2d.size){d2HideIds(Array.from(state.sel2d)); d2SetSel([]);} return;}
   if(!state.sel.length)return;
   state.sel.forEach(function(n){n.visible=false;});
   var none=[]; setSelection(none); applyVisibility();
 };
 $('btnIsolate').onclick=function(){
+  if(state.is2d){
+    var keep=new Set(state.sel2d); if(!keep.size)return;
+    for(var i=0;i<d2.ents.length;i++)d2.hidden[i]=keep.has(i)?0:1;
+    keep.forEach(function(id){d2.layers[d2.ents[id].layer].node.visible=true;});
+    d2.layers.forEach(function(l,li){d2Rebuild(li);}); applyVisibility(); d2ZoomTo(Array.from(keep)); return;
+  }
   var s=state.sel.slice(); if(!s.length)return;
   forEachNode(state.root,function(n){n.visible=false;});
   s.forEach(function(x){var p=x; while(p){p.visible=true; p=p.parent;} forEachNode(x,function(n){n.visible=true;});});
@@ -454,6 +803,16 @@ function row(k,v){return '<dt>'+k+'</dt><dd>'+v+'</dd>';}
 function updateMass(){
   var pp=$('ppanel');
   if(!state.massOn||!state.root||!state.model){pp.classList.remove('on'); state.comAt=null; comEl.style.display='none'; return;}
+  if(state.is2d){
+    var sel=state.sel2d.size, ids=sel?Array.from(state.sel2d):d2AllVisible(), tl=0, nt=0;
+    ids.forEach(function(id){var e=d2.ents[id]; if(e.text)nt++; else tl+=d2EntLength(e);});
+    var bb=d2Bounds(ids), sc=state.unitScale;
+    var h2='<h2>'+esc(sel?(sel===1?'1 item selected':sel.toLocaleString()+' items selected'):state.root.name)+'</h2><dl>';
+    if(ids.length)h2+=row('Width',fmt((bb.maxx-bb.minx)*sc))+row('Height',fmt((bb.maxy-bb.miny)*sc));
+    h2+=row('Total line length',fmt(tl))+row('Lines, arcs and curves',(ids.length-nt).toLocaleString())+row('Text items',nt.toLocaleString())+'</dl>';
+    h2+='<p class="hint">Total line length adds up every visible line, arc and curve'+(sel?' in the selection':'')+'. For a flat pattern that is the cut length. Text isn’t included.</p>';
+    pp.innerHTML=h2; pp.classList.add('on'); state.comAt=null; comEl.style.display='none'; return;
+  }
   var s=state.sel, whole=!s.length||(s.length===1&&s[0]===state.root), mp=state.model.massProps, html='';
   state.comAt=null;
   if(whole){
@@ -474,7 +833,7 @@ function updateMass(){
     var g=geometryTotals(meshes);
     if(!whole)html+='<h2>'+esc(s.length===1?s[0].name:s.length+' components selected')+'</h2>';
     html+='<p class="sub">Estimated from the geometry</p><dl>'+row('Volume',fmtVol(g.vol))+row('Surface area',fmtArea(g.area));
-    if(g.size)html+=row('Size X',fmt(g.size.x))+row('Size Y',fmt(g.size.y))+row('Size Z',fmt(g.size.z));
+    if(g.size){var gs=dispVec(g.size); html+=row('Size X',fmt(Math.abs(gs.x)))+row('Size Y',fmt(Math.abs(gs.y)))+row('Size Z',fmt(Math.abs(gs.z)));}
     html+='</dl>';
     var dens=0, opts='<option value="">Choose a material</option>';
     DENSITIES.forEach(function(d){opts+='<option value="'+d[0]+'"'+(densityKey===d[0]?' selected':'')+'>'+d[1]+' ('+d[2].toLocaleString()+' kg/m³)</option>'; if(densityKey===d[0])dens=d[2];});
@@ -515,7 +874,7 @@ function fit(list,dir){
 }
 var dirs={iso:[1,0.75,1.15],front:[0,0,1],back:[0,0,-1],top:[0,1,0.0001],bottom:[0,-1,0.0001],right:[1,0,0],left:[-1,0,0]};
 function setView(v){var d=dirs[v]||dirs.iso; camera.up.set(0,1,0); fit(null,new THREE.Vector3(d[0],d[1],d[2]).normalize()); $('selView').value=v;}
-$('btnFit').onclick=function(){fit();};
+$('btnFit').onclick=function(){if(state.is2d)d2Fit(); else fit();};
 // Turn the view to look straight along dir (pointing from the model towards the eye), keeping the
 // pivot point where it already is on screen.
 function lookAlong(dir,pivot){
@@ -542,6 +901,7 @@ function shellOfHit(h){
 // with no flat face there, snap to the nearest standard view.
 function normalTo(){
   if(!state.meshes.length)return;
+  if(state.is2d){d2Fit(); return;}
   var cur=camera.position.clone().sub(controls.target).normalize(), n=null, pivot=null;
   if(mouse.inside){
     var h=rayHit(mouse.x,mouse.y);
@@ -554,9 +914,9 @@ function normalTo(){
   lookAlong(new THREE.Vector3(names[pick][0],names[pick][1],names[pick][2]),null); $('selView').value=pick;
 }
 var mouse={x:0,y:0,inside:false}, lastMid=null;
-function setProjection(mode){
+function setProjection(mode,noSave){
   var next=mode==='ortho'?ortho:persp;
-  $('selProj').value=mode; try{localStorage.setItem('edv.proj',mode);}catch(e){}
+  $('selProj').value=mode; if(!noSave){try{localStorage.setItem('edv.proj',mode);}catch(e){}}
   if(next===camera)return;
   var t=controls.target, dir=camera.position.clone().sub(t), dist=dir.length()||1; dir.normalize();
   var tanH=Math.tan(THREE.MathUtils.degToRad(persp.fov/2));
@@ -742,7 +1102,7 @@ function clearHover(){
 function doHover(){
   hover.timer=null; hover.last=performance.now();
   if(!state.measuring||down||rot){clearHover(); return;}
-  var e=measurePick(hover.x,hover.y,true), key=e?e.key:null;
+  var e=state.is2d?measurePick2d(hover.x,hover.y):measurePick(hover.x,hover.y,true), key=e?e.key:null;
   if(key===hover.key)return;
   clearHover(); hover.key=key; needsRender=true;
   if(!e)return;
@@ -774,7 +1134,7 @@ function clearMeasure(){
   state.ents=[]; state.mObjs.forEach(function(o){scene.remove(o); o.geometry.dispose();}); state.mObjs=[]; state.dim=null;
   overlay.innerHTML=''; updatePanel(); needsRender=true;
 }
-function clearAll(){clearMeasure(); select(null);}
+function clearAll(){clearMeasure(); select(null); if(state.is2d&&state.sel2d.size)d2SetSel([]);}
 function fatLines(points,mat,list){
   var arr=[]; for(var i=0;i<points.length;i+=2)arr.push(points[i].x,points[i].y,points[i].z,points[i+1].x,points[i+1].y,points[i+1].z);
   var g=new THREE.LineSegmentsGeometry(); g.setPositions(arr);
@@ -797,7 +1157,7 @@ function compute(){
   var E=state.ents, r={rows:[],title:'',big:'',dim:null,label:''};
   if(E.length===1){
     var e=E[0];
-    if(e.type==='point'){r.title=e.snapped?'Corner':'Point on face'; r.big=''; r.rows=[['X',fmt(e.p.x)],['Y',fmt(e.p.y)],['Z',fmt(e.p.z)]]; r.hint='Pick a second item to measure between them.';}
+    if(e.type==='point'){var dp=dispVec(e.p); r.title=state.is2d?'End point':(e.snapped?'Corner':'Point on face'); r.big=''; r.rows=[['X',fmt(dp.x)],['Y',fmt(dp.y)]]; if(!state.is2d)r.rows.push(['Z',fmt(dp.z)]); r.hint='Pick a second item to measure between them.';}
     else if(e.type==='line'){r.title='Edge (straight)'; r.big=fmt(e.length); r.rows=[['Length',fmt(e.length)]]; r.dim=[e.a,e.b]; r.label=fmt(e.length);}
     else if(e.type==='arc'){r.title=e.closed?'Edge (circle)':'Edge (arc)'; r.big='Ø '+fmt(2*e.r); r.rows=[['Diameter',fmt(2*e.r)],['Radius',fmt(e.r)],[e.closed?'Circumference':'Arc length',fmt(e.length)]]; r.label='Ø '+fmt(2*e.r);}
     else if(e.type==='face'){r.title=e.planar?'Face (flat)':'Face (curved)'; r.big=fmtArea(e.area); r.rows=[['Area',fmtArea(e.area)],['Perimeter',fmt(e.perim)]]; r.label=fmtArea(e.area);}
@@ -806,9 +1166,9 @@ function compute(){
   }
   var a=E[0],b=E[1],pa=anchor(a),pb=anchor(b);
   if(pa&&pb){
-    var d=pb.clone().sub(pa);
+    var d=pb.clone().sub(pa), dd=dispVec(d);
     r.title=(a.type==='arc'&&b.type==='arc')?'Centre distance':(a.type==='arc'||b.type==='arc')?'Distance to centre':'Distance';
-    r.big=fmt(d.length()); r.rows=[['ΔX',fmt(Math.abs(d.x))],['ΔY',fmt(Math.abs(d.y))],['ΔZ',fmt(Math.abs(d.z))]];
+    r.big=fmt(d.length()); r.rows=[['ΔX',fmt(Math.abs(dd.x))],['ΔY',fmt(Math.abs(dd.y))]]; if(!state.is2d)r.rows.push(['ΔZ',fmt(Math.abs(dd.z))]);
     r.dim=[pa,pb]; r.label=fmt(d.length()); return r;
   }
   if((pa&&b.type==='line')||(pb&&a.type==='line')){
@@ -886,7 +1246,7 @@ function updatePanel(r){
   var mp=$('mpanel');
   if(!state.measuring){mp.classList.remove('on');return;}
   mp.classList.add('on');
-  if(!state.ents.length){mp.innerHTML='<h2>Measure</h2><p class="hint">Move over the model and corners, edges and faces light up. Click to pick one, or pick two to measure between them. Esc clears.</p>'; return;}
+  if(!state.ents.length){mp.innerHTML='<h2>Measure</h2><p class="hint">'+(state.is2d?'Move over the drawing and line ends, lines, arcs and circles light up.':'Move over the model and corners, edges and faces light up.')+' Click to pick one, or pick two to measure between them. Esc clears.</p>'; return;}
   r=r||compute();
   var html='<h2>'+r.title+'</h2>';
   if(r.big)html+='<div class="big">'+r.big+'</div>';
@@ -914,13 +1274,14 @@ renderer.domElement.addEventListener('auxclick',function(e){e.preventDefault();}
 renderer.domElement.addEventListener('pointerleave',function(){mouse.inside=false; if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
 function endBand(){if(band){band.remove(); band=null;}}
 renderer.domElement.addEventListener('pointerdown',function(e){
+  if(e.pointerType==='mouse'&&e.button===1&&state.meshes.length){   // double-click the wheel: zoom to fit
+    var now=performance.now();
+    if(lastMid&&now-lastMid.t<450&&Math.hypot(e.clientX-lastMid.x,e.clientY-lastMid.y)<8){lastMid=null; down=null; e.preventDefault(); if(state.is2d)d2Fit(); else fit(); return;}
+    lastMid={t:now,x:e.clientX,y:e.clientY};
+    if(state.is2d)return;
+  }
   // Middle-drag (or Alt + left-drag) rotates about the point on the model under the pointer.
-  if(e.pointerType==='mouse'&&state.meshes.length&&!e.ctrlKey&&!e.metaKey&&((e.button===1&&!e.shiftKey)||(e.button===0&&e.altKey))){
-    if(e.button===1){   // double-click the wheel: zoom to fit
-      var now=performance.now();
-      if(lastMid&&now-lastMid.t<450&&Math.hypot(e.clientX-lastMid.x,e.clientY-lastMid.y)<8){lastMid=null; down=null; e.preventDefault(); fit(); return;}
-      lastMid={t:now,x:e.clientX,y:e.clientY};
-    }
+  if(!state.is2d&&e.pointerType==='mouse'&&state.meshes.length&&!e.ctrlKey&&!e.metaKey&&((e.button===1&&!e.shiftKey)||(e.button===0&&e.altKey))){
     var ph=rayHit(e.clientX,e.clientY);
     rot={id:e.pointerId,x:e.clientX,y:e.clientY,moved:0,pivot:ph?ph.point.clone():controls.target.clone()};
     state.pivotAt=ph?rot.pivot:null; pivotEl.style.display=ph?'':'none';
@@ -953,13 +1314,20 @@ renderer.domElement.addEventListener('pointerup',function(e){
   if(!state.meshes.length){endBand(); return;}
   if(d.box){
     endBand();
+    if(state.is2d){var ids=d2BoxSelect(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x); d2SetSel(e.shiftKey?Array.from(state.sel2d).concat(ids):ids); return;}
     var picked=boxSelect(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x);
     setSelection(e.shiftKey?state.sel.concat(picked):picked,{noScroll:true});
     return;
   }
   var moved=Math.hypot(e.clientX-d.x,e.clientY-d.y),dt=performance.now()-d.t;
   if(moved>5||dt>600||d.b!==0)return;
-  if(state.measuring){var m=measurePick(e.clientX,e.clientY); if(m){if(m.type==='face')m=faceEntity(m.mesh,m.shell); clearHover(); addEnt(m);} return;}
+  if(state.measuring){var m=state.is2d?measurePick2d(e.clientX,e.clientY):measurePick(e.clientX,e.clientY); if(m){if(m.type==='face')m=faceEntity(m.mesh,m.shell); clearHover(); addEnt(m);} return;}
+  if(state.is2d){
+    var pid=d2Pick(e.clientX,e.clientY,7,false), add2=e.shiftKey||e.ctrlKey||e.metaKey, cur=Array.from(state.sel2d);
+    if(pid>=0)d2SetSel(add2?(state.sel2d.has(pid)?cur.filter(function(x){return x!==pid;}):cur.concat([pid])):[pid]);
+    else if(!add2)d2SetSel([]);
+    return;
+  }
   var hit=rayHit(e.clientX,e.clientY), add=e.shiftKey||e.ctrlKey||e.metaKey;
   if(hit){var n=hit.object.userData.node; if(add)toggleSelect(n); else select(n);}
   else if(!add)select(null);
@@ -969,18 +1337,18 @@ document.addEventListener('keydown',function(e){
   var t=e.target, typing=t&&(t.tagName==='INPUT'&&t.type!=='checkbox'||t.tagName==='TEXTAREA'||t.tagName==='SELECT');
   if(e.key==='Escape'){
     if(typing&&t.id==='search'){t.blur();}
-    var had=state.ents.length||state.sel.length;
+    var had=state.ents.length||state.sel.length||state.sel2d.size;
     clearAll(); $('spanel').classList.remove('on');
     if(!had&&state.measuring)setMeasuring(false);
     if(!$('help').hidden){$('help').hidden=true; $('btnHelp').setAttribute('aria-expanded','false');}
     return;
   }
   if(typing||!state.meshes.length)return;
-  if((e.ctrlKey||e.metaKey)&&viewKeys[e.key]){e.preventDefault(); setView(viewKeys[e.key]); return;}
+  if((e.ctrlKey||e.metaKey)&&viewKeys[e.key]){e.preventDefault(); if(!state.is2d)setView(viewKeys[e.key]); return;}
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   if(e.key==='m'||e.key==='M'){e.preventDefault(); setMeasuring(!state.measuring);}
   else if(e.key==='f'||e.key==='F'){e.preventDefault(); normalTo();}
-  else if((e.key==='h'||e.key==='H')&&state.sel.length){e.preventDefault(); $('btnHideSel').click();}
+  else if((e.key==='h'||e.key==='H')&&(state.sel.length||state.sel2d.size)){e.preventDefault(); $('btnHideSel').click();}
 });
 
 // ---------- file input ----------
@@ -1002,5 +1370,5 @@ if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostnam
   window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
 }
 $('btnTree').onclick=function(){var a=$('aside'),o=!a.classList.contains('open'); a.classList.toggle('open',o); this.setAttribute('aria-expanded',o);};
-window.__edv={normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
