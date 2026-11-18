@@ -43,6 +43,15 @@ var Y_AXIS=new THREE.Vector3(0,1,0);
 // Turn the view about a fixed point P (the point picked when the drag started), keeping P still on screen.
 function rotateAbout(P,dx,dy){
   var h=renderer.domElement.clientHeight||1, az=2*Math.PI*dx/h*0.8, el=2*Math.PI*dy/h*0.8;
+  if(rotateMode==='free'){   // tumble freely about the screen axes, carrying "up" with the view
+    camera.updateMatrixWorld();
+    var me=camera.matrixWorld.elements, sr=new THREE.Vector3(me[0],me[1],me[2]).normalize(), su=new THREE.Vector3(me[4],me[5],me[6]).normalize();
+    var fq=new THREE.Quaternion().setFromAxisAngle(su,-az).multiply(new THREE.Quaternion().setFromAxisAngle(sr,-el));
+    camera.position.sub(P).applyQuaternion(fq).add(P);
+    controls.target.sub(P).applyQuaternion(fq).add(P);
+    camera.up.applyQuaternion(fq).normalize();
+    controls.update(); needsRender=true; return;
+  }
   var off=camera.position.clone().sub(controls.target), phi=off.angleTo(Y_AXIS);
   var np=Math.max(0.02,Math.min(Math.PI-0.02,phi-el)); el=phi-np;
   var right=new THREE.Vector3().crossVectors(Y_AXIS,off);
@@ -181,6 +190,7 @@ async function openFile(file,handle){
   closeMenu(); if(!$('markup').hidden)closeMarkup();
   state.fileKey=file.name+'|'+file.size; pendingRecent=handle?{handle:handle,name:file.name}:null;
   showWarn(''); $('preview').style.display='none';
+  state.opening=true;
   busy(true,'Reading '+file.name+'…',0.02); await tick();
   try{
     var buf=new Uint8Array(await file.arrayBuffer()), m;
@@ -211,7 +221,7 @@ async function openFile(file,handle){
     await buildMesh(m,kind);
     if(m.warnings&&m.warnings.length)showWarn(m.warnings.join(' '));
   }catch(e){console.error(e); showWarn((e&&e.message)?e.message:'This file couldn’t be read.');}
-  finally{busy(false);}
+  finally{busy(false); state.opening=false;}
 }
 function pref(k){try{return localStorage.getItem('edv.'+k);}catch(e){return null;}}
 function setPref(k,v){try{localStorage.setItem('edv.'+k,v);}catch(e){}}
@@ -228,16 +238,29 @@ function workerJob(make,msg,transfer,label,frac){
   });
 }
 async function readStep(buf){
-  try{
-    var r=await workerJob(function(){if(!stepWorker)stepWorker=new Worker('step-worker.js'); return stepWorker;},{buffer:buf.buffer,params:{linearUnit:'meter'}},[buf.buffer],'Converting STEP geometry…',0.3);
-    return r.result;
-  }catch(e){if(stepWorker){stepWorker.terminate(); stepWorker=null;} throw new Error('This STEP file couldn’t be converted: '+e.message+'.');}
+  var last=null;
+  for(var attempt=0;attempt<2;attempt++){
+    try{
+      var copy=buf.slice();
+      var r=await workerJob(function(){if(!stepWorker)stepWorker=new Worker('step-worker.js'); return stepWorker;},{buffer:copy.buffer,params:{linearUnit:'meter'}},[copy.buffer],attempt?'Converting STEP geometry (second try)…':'Converting STEP geometry…',0.3);
+      return r.result;
+    }catch(e){
+      last=e; if(stepWorker){stepWorker.terminate(); stepWorker=null;}
+      if(/couldn’t be read as STEP/.test(e.message))break;   // a real problem with the file: don't retry
+    }
+  }
+  throw new Error('This STEP file couldn’t be converted: '+last.message+'.');
 }
 async function convertDwg(buf){
-  try{
-    var r=await workerJob(function(){if(!dwgWorker)dwgWorker=new Worker('dwg-worker.js',{type:'module'}); return dwgWorker;},{buffer:buf.buffer},[buf.buffer],'Converting DWG…',0.2);
-    return r.dxf;
-  }catch(e){if(dwgWorker){dwgWorker.terminate(); dwgWorker=null;} throw new Error('This DWG couldn’t be converted ('+e.message+'). DWG files from AutoCAD R13 to 2018 are supported; saving the drawing as DXF usually works.');}
+  var last=null;
+  for(var attempt=0;attempt<2;attempt++){
+    try{
+      var copy=buf.slice();
+      var r=await workerJob(function(){if(!dwgWorker)dwgWorker=new Worker('dwg-worker.js',{type:'module'}); return dwgWorker;},{buffer:copy.buffer},[copy.buffer],attempt?'Converting DWG (second try)…':'Converting DWG…',0.2);
+      return r.dxf;
+    }catch(e){last=e; if(dwgWorker){dwgWorker.terminate(); dwgWorker=null;}}
+  }
+  throw new Error('This DWG couldn’t be converted ('+last.message+'). DWG files from AutoCAD R13 to 2018 are supported; saving the drawing as DXF usually works.');
 }
 var geomCache=new Map();
 function clearModel(){
@@ -337,6 +360,7 @@ function finishBuild(rootNode,statsHtml){
   renderTree(rootNode); applyVisibility();
   ['btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnViews','btnExport','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   if(pendingRecent){addRecent(pendingRecent.handle,pendingRecent.name); pendingRecent=null;}
+  $('btnClose').hidden=false;
   $('empty').style.display='none';
   renderStats(statsHtml);
   state.radius=1;
@@ -355,7 +379,7 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>'+(extra?'<span class="opts">'+extra+'</span> ':'')+'viewer version 10';
+  st.innerHTML=html+'<br>'+(extra?'<span class="opts">'+extra+'</span> ':'')+'viewer version 11';
   var fu=$('selFileUnit');
   if(fu)fu.onchange=function(){state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
   var su=$('selUp');
@@ -772,16 +796,24 @@ var DENSITIES=[['steel','Steel',7850],['stainless','Stainless steel',8000],['alu
 var densityKey=''; try{densityKey=localStorage.getItem('edv.density')||'';}catch(e){}
 function esc(t){return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function num(v,dp){return v.toLocaleString(undefined,{minimumFractionDigits:dp,maximumFractionDigits:dp});}
+var massU=pref('massU')||'auto', volU=pref('volU')||'auto', areaU=pref('areaU')||'auto';
 function fmtMass(kg){
+  if(massU==='g')return num(kg*1000,1)+' g';
+  if(massU==='kg')return num(kg,kg<1?3:2)+' kg';
   if(state.units==='in')return num(kg*2.2046226,2)+' lb';
   return kg>=1?num(kg,2)+' kg':num(kg*1000,1)+' g';
 }
 function fmtVol(m3){
+  if(volU==='mm3')return num(m3*1e9,0)+' mm³';
+  if(volU==='L')return num(m3*1000,m3*1000<10?3:2)+' L';
+  if(volU==='m3')return num(m3,m3<0.01?6:4)+' m³';
   if(state.units==='in')return num(m3*61023.7441,2)+' in³';
   if(state.units==='m')return num(m3,6)+' m³';
   var cm3=m3*1e6; return cm3>=1e4?num(m3,4)+' m³':num(cm3,2)+' cm³';
 }
 function fmtArea(m2){
+  if(areaU==='mm2')return num(m2*1e6,0)+' mm²';
+  if(areaU==='m2')return num(m2,m2<0.01?6:4)+' m²';
   if(state.units==='in')return num(m2*1550.0031,2)+' in²';
   if(state.units==='m')return num(m2,4)+' m²';
   var cm2=m2*1e4; return cm2>=1e4?num(m2,3)+' m²':num(cm2,2)+' cm²';
@@ -856,7 +888,12 @@ function updateMass(){
     html+='<div class="big" style="margin-top:6px">'+(dens?fmtMass(g.vol*dens):'—')+'</div>';
     html+='<p class="hint">Volume × material density. '+(g.exact?'':'Size is approximate for a selection this large. ')+'Bodies that aren’t closed solids, such as surfaces, give unreliable volumes.</p>';
   }
+  function uSel(id,cur,opts){return '<select class="btn" id="'+id+'">'+opts.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===cur?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>';}
+  html+='<div class="unitrow"><label>Volume '+uSel('selVolU',volU,[['auto','Auto'],['mm3','mm³'],['L','litres'],['m3','m³']])+'</label><label>Area '+uSel('selAreaU',areaU,[['auto','Auto'],['mm2','mm²'],['m2','m²']])+'</label><label>Mass '+uSel('selMassU',massU,[['auto','Auto'],['g','g'],['kg','kg']])+'</label></div>';
   pp.innerHTML=html; pp.classList.add('on');
+  $('selVolU').onchange=function(){volU=this.value; setPref('volU',volU); updateMass();};
+  $('selAreaU').onchange=function(){areaU=this.value; setPref('areaU',areaU); updateMass();};
+  $('selMassU').onchange=function(){massU=this.value; setPref('massU',massU); updateMass();};
   var sd=$('selDensity'); if(sd)sd.onchange=function(){densityKey=this.value; try{localStorage.setItem('edv.density',densityKey);}catch(e){} updateMass();};
   comEl.style.display=state.comAt?'':'none'; needsRender=true;
 }
@@ -1272,8 +1309,10 @@ function updatePanel(r){
   if(r.big)html+='<div class="big">'+r.big+'</div>';
   if(r.rows.length)html+='<dl>'+r.rows.map(function(x){return '<dt>'+x[0]+'</dt><dd>'+x[1]+'</dd>';}).join('')+'</dl>';
   if(r.hint)html+='<p class="hint" style="margin-top:6px">'+r.hint+'</p>';
-  html+='<div class="acts"><button class="btn" id="mCopy" title="Copy (Ctrl+C)">Copy</button><button class="btn" id="mClear">Clear</button></div>';
+  var oneFace=state.ents.length===1&&state.ents[0].type==='face'&&state.ents[0].planar;
+  html+='<div class="acts"><button class="btn" id="mCopy" title="Copy the number (Ctrl+C)">Copy</button>'+(oneFace?'<button class="btn" id="mDxf" title="Save this face’s outline as a DXF">Export DXF</button>':'')+'<button class="btn" id="mClear">Clear</button></div>';
   mp.innerHTML=html; $('mClear').onclick=clearMeasure; $('mCopy').onclick=copyMeasurement;
+  if(oneFace){var fe0=state.ents[0]; $('mDxf').onclick=function(){exportFaceDXF(fe0);};}
 }
 function updateOverlay(){
   var rect=rectOf();
@@ -1406,7 +1445,11 @@ if('launchQueue' in window){
 if('serviceWorker' in navigator){
   // When an updated viewer takes over, reload once so the new code is used straight away.
   var hadController=!!navigator.serviceWorker.controller, reloaded=false;
-  navigator.serviceWorker.addEventListener('controllerchange',function(){if(hadController&&!reloaded&&!state.meshes.length){reloaded=true; location.reload();}});
+  navigator.serviceWorker.addEventListener('controllerchange',function(){
+    if(!hadController||reloaded)return;
+    if(!state.opening&&!state.meshes.length){reloaded=true; location.reload(); return;}
+    showUpdateNotice();   // a file is opening or open: never reload under it
+  });
 }
 if('serviceWorker' in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
   window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(function(r){r.update();}).catch(function(e){console.warn('Offline support unavailable',e);});});
@@ -1515,8 +1558,9 @@ function contextMenu(x,y,fromTree){
     items.push({label:'Hide',hint:'H',action:function(){$('btnHideSel').click();}});
     items.push({label:'Isolate',action:function(){$('btnIsolate').click();}});
     items.push({label:'Zoom to',action:function(){if(state.is2d)d2ZoomTo(Array.from(state.sel2d)); else fit(selMeshes());}});
-    if(!state.is2d){var allT=state.sel.every(function(n2){return n2.transparent;}); items.push({label:allT?'Make opaque':'Make transparent',hint:'T',action:function(){toggleTransparent();}});}
+    if(!state.is2d){var allT=state.sel.every(function(n2){return n2.transparent;}); items.push({label:allT?'Make opaque':'Make transparent',hint:'T',action:function(){toggleTransparent();}}); items.push({label:'Export STL',action:function(){exportSTL(state.sel.slice());}});}
   }
+  if(!fromTree&&hit&&hit.faceIndex!=null){var hfe=faceEntity(hit.object,shellOfHit(hit)); if(hfe.planar)items.push({label:'Export face as DXF',action:function(){exportFaceDXF(hfe);}});}
   if(!fromTree&&(hit||pid>=0))items.push({label:'Measure from here',hint:'M',action:function(){
     setMeasuring(true);
     var m=state.is2d?measurePick2d(x,y):measurePick(x,y);
@@ -1543,7 +1587,15 @@ function measureText(){
   if(rows.length)out+=' ('+rows.map(function(x){return x[0]+' '+x[1];}).join(', ')+')';
   return out;
 }
-function copyMeasurement(){var t=measureText(); if(!t)return; copyText(t).then(function(ok){toast(ok?'Copied: '+t:'Couldn’t copy to the clipboard');});}
+var DEC=(1.5).toLocaleString().charAt(1);
+function plainNumber(t){var s2=String(t).split('').filter(function(ch){return /[0-9\-]/.test(ch)||ch===DEC;}).join(''); return DEC==='.'?s2:s2.replace(DEC,'.');}
+function measureNumber(){
+  if(!state.ents.length)return '';
+  var r=compute();
+  if(r.big)return plainNumber(r.big.replace(/^Ø\s*/,''));
+  return r.rows.map(function(x){return plainNumber(x[1]);}).join(', ');   // a single point: its coordinates
+}
+function copyMeasurement(){var t=measureNumber(); if(!t)return; copyText(t).then(function(ok){toast(ok?'Copied '+t:'Couldn’t copy to the clipboard');});}
 
 // ---------- view cube ----------
 var cubeWrap=document.createElement('div'); cubeWrap.className='cube'; cubeWrap.title='Click a face, edge or corner to turn the view'; view.appendChild(cubeWrap);
@@ -1858,6 +1910,10 @@ $('btnExport').onclick=function(){
     items.push({label:'Parts list (CSV)',action:function(){exportParts(false);}});
     items.push({label:'Parts list, visible parts only (CSV)',action:function(){exportParts(true);}});
     items.push({label:'Copy parts list for a spreadsheet',action:function(){exportParts(false,true);}});
+    items.push({sep:true});
+    items.push({label:'STL of selected parts',disabled:!state.sel.length,action:function(){exportSTL(state.sel.slice());}});
+    items.push({label:'STL of everything visible',action:function(){exportSTL([state.root],state.root.name);}});
+    var lf=lastFlatFace(); items.push({label:'Face as DXF profile',disabled:!lf,hint:lf?'':'pick a flat face in Measure',action:function(){exportFaceDXF(lf);}});
   }
   menuBelow(this,items,'Export');
 };
@@ -1946,5 +2002,176 @@ function d2Snap(cx,cy){
 var SNAP_NAME={end:'End point',mid:'Midpoint',centre:'Centre',intersection:'Intersection'};
 var SNAP_CLASS={end:'dot snap',mid:'dot mid',centre:'dot ctr',intersection:'dot xsect'};
 
-window.__edv={openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+
+// =====================================================================
+// ---------- export a flat face as a DXF profile ----------
+function fitCircle(P){ // least-squares circle through 2D points [[x,y],...]
+  var n=P.length, mx=0, my=0, i; for(i=0;i<n;i++){mx+=P[i][0]; my+=P[i][1];} mx/=n; my/=n;
+  var suu=0,svv=0,suv=0,suuu=0,svvv=0,suvv=0,svuu=0;
+  for(i=0;i<n;i++){var u=P[i][0]-mx, v=P[i][1]-my; suu+=u*u; svv+=v*v; suv+=u*v; suuu+=u*u*u; svvv+=v*v*v; suvv+=u*v*v; svuu+=v*u*u;}
+  var det=suu*svv-suv*suv; if(Math.abs(det)<1e-18)return null;
+  var a=(suuu+suvv)/2, b=(svvv+svuu)/2, uc=(a*svv-b*suv)/det, vc=(b*suu-a*suv)/det;
+  var cx=uc+mx, cy=vc+my, r=Math.sqrt(uc*uc+vc*vc+(suu+svv)/n);
+  return {cx:cx,cy:cy,r:r};
+}
+function faceProfile(fe){
+  var mesh=fe.mesh, g=mesh.userData.g, si=fe.shell, T=topo(g), M=mesh.matrixWorld, S=g.edgeShell;
+  var segs=[], k; for(k=0;k<S.length;k++)if(S[k]===si)segs.push(k);
+  if(segs.length<3)return null;
+  var adj=new Map();
+  segs.forEach(function(s){[T.A[s],T.B[s]].forEach(function(v){var l=adj.get(v); if(!l){l=[]; adj.set(v,l);} l.push(s);});});
+  // a frame in the face's plane, lined up with its longest straight edge
+  var n=fe.n.clone(), c=fe.c.clone(), longest=0, ux=null;
+  segs.forEach(function(s){var a=cpos(T,T.A[s],M), b=cpos(T,T.B[s],M), d=b.clone().sub(a); d.addScaledVector(n,-d.dot(n)); var L=d.length(); if(L>longest){longest=L; ux=d.normalize();}});
+  if(!ux)return null;
+  var vy=new THREE.Vector3().crossVectors(n,ux).normalize();
+  function to2(v){var p=cpos(T,v,M).sub(c); return [p.dot(ux)*1000,p.dot(vy)*1000];}
+  var used=new Set(), loops=[];
+  segs.forEach(function(s0){
+    if(used.has(s0))return;
+    var loop=[], s=s0, v=T.A[s0], guard=0;
+    while(!used.has(s)&&guard++<2000000){
+      used.add(s); loop.push({p:to2(v),o:T.other[s]});
+      var w=T.A[s]===v?T.B[s]:T.A[s], nx=(adj.get(w)||[]).filter(function(j){return !used.has(j);})[0];
+      v=w; if(nx===undefined)break; s=nx;
+    }
+    if(loop.length>=3)loops.push(loop);
+  });
+  if(!loops.length)return null;
+  var minx=Infinity,miny=Infinity,maxx=-Infinity,maxy=-Infinity;
+  loops.forEach(function(l){l.forEach(function(q){minx=Math.min(minx,q.p[0]); miny=Math.min(miny,q.p[1]); maxx=Math.max(maxx,q.p[0]); maxy=Math.max(maxy,q.p[1]);});});
+  loops.forEach(function(l){l.forEach(function(q){q.p[0]-=minx; q.p[1]-=miny;});});
+  var size=Math.max(maxx-minx,maxy-miny), ents=[];
+  function turn(a,b,c2){var x1=b[0]-a[0],y1=b[1]-a[1],x2=c2[0]-b[0],y2=c2[1]-b[1],l=Math.hypot(x1,y1)*Math.hypot(x2,y2); return l?Math.acos(Math.max(-1,Math.min(1,(x1*x2+y1*y2)/l))):0;}
+  function classifyRun(P){
+    var a=P[0], b=P[P.length-1], L=Math.hypot(b[0]-a[0],b[1]-a[1]), dev=0, i;
+    if(P.length===2)return {t:'line',a:a,b:b};
+    if(L>1e-9){for(i=1;i<P.length-1;i++){dev=Math.max(dev,Math.abs((b[0]-a[0])*(a[1]-P[i][1])-(a[0]-P[i][0])*(b[1]-a[1]))/L);} if(dev<Math.max(0.005,1e-4*L))return {t:'line',a:a,b:b};}
+    var cf=fitCircle(P);
+    if(cf&&cf.r<size*20){
+      var ok=true; for(i=0;i<P.length;i++)if(Math.abs(Math.hypot(P[i][0]-cf.cx,P[i][1]-cf.cy)-cf.r)>Math.max(0.01,0.002*cf.r)){ok=false;break;}
+      if(ok){
+        var cr=0; for(i=0;i+1<P.length;i++)cr+=(P[i][0]-cf.cx)*(P[i+1][1]-cf.cy)-(P[i][1]-cf.cy)*(P[i+1][0]-cf.cx);
+        var s=Math.atan2(a[1]-cf.cy,a[0]-cf.cx)*180/Math.PI, e=Math.atan2(b[1]-cf.cy,b[0]-cf.cx)*180/Math.PI;
+        return cr>0?{t:'arc',cx:cf.cx,cy:cf.cy,r:cf.r,s:s,e:e}:{t:'arc',cx:cf.cx,cy:cf.cy,r:cf.r,s:e,e:s};
+      }
+    }
+    return {t:'poly',pts:P};
+  }
+  var holes=0, areaMax=-1, outer=-1;
+  loops.forEach(function(l,li){var A=0; for(var i=0;i<l.length;i++){var p=l[i].p,q=l[(i+1)%l.length].p; A+=p[0]*q[1]-q[0]*p[1];} A=Math.abs(A)/2; if(A>areaMax){areaMax=A; outer=li;}});
+  loops.forEach(function(l,li){
+    if(li!==outer)holes++;
+    var N=l.length, cuts=[];
+    for(var i=0;i<N;i++){var prev=l[(i-1+N)%N], cur=l[i], nxt=l[(i+1)%N]; if(prev.o!==cur.o||turn(prev.p,cur.p,nxt.p)>0.5)cuts.push(i);}
+    var all=l.map(function(q){return q.p;});
+    if(!cuts.length){ // one smooth closed edge: a circle, or a closed curve
+      var cf=fitCircle(all), ok=!!cf;
+      if(ok)for(var j=0;j<N;j++)if(Math.abs(Math.hypot(all[j][0]-cf.cx,all[j][1]-cf.cy)-cf.r)>Math.max(0.01,0.002*cf.r)){ok=false;break;}
+      ents.push(ok?{t:'circle',cx:cf.cx,cy:cf.cy,r:cf.r}:{t:'poly',pts:all,closed:true}); return;
+    }
+    var runs=[];
+    for(var q=0;q<cuts.length;q++){var st=cuts[q], en=cuts[(q+1)%cuts.length], P=[], m=st; do{P.push(all[m]); m=(m+1)%N;}while(m!==en); P.push(all[en]); runs.push(classifyRun(P));}
+    var arcs=runs.filter(function(r){return r.t==='arc';});
+    if(arcs.length===runs.length&&arcs.every(function(r){return Math.hypot(r.cx-arcs[0].cx,r.cy-arcs[0].cy)<0.01&&Math.abs(r.r-arcs[0].r)<0.01;}))ents.push({t:'circle',cx:arcs[0].cx,cy:arcs[0].cy,r:arcs[0].r});
+    else runs.forEach(function(r){ents.push(r);});
+  });
+  return {ents:ents,w:maxx-minx,h:maxy-miny,holes:holes};
+}
+function dxfText(prof){
+  function f(v){return (Math.round(v*1e6)/1e6).toString();}
+  var o=['0','SECTION','2','HEADER','9','$ACADVER','1','AC1009','9','$INSUNITS','70','4','9','$EXTMIN','10','0','20','0','30','0','9','$EXTMAX','10',f(prof.w),'20',f(prof.h),'30','0','0','ENDSEC',
+         '0','SECTION','2','TABLES','0','TABLE','2','LAYER','70','1','0','LAYER','2','PROFILE','70','0','62','7','6','CONTINUOUS','0','ENDTAB','0','ENDSEC','0','SECTION','2','ENTITIES'];
+  prof.ents.forEach(function(e){
+    if(e.t==='line')o.push('0','LINE','8','PROFILE','10',f(e.a[0]),'20',f(e.a[1]),'30','0','11',f(e.b[0]),'21',f(e.b[1]),'31','0');
+    else if(e.t==='circle')o.push('0','CIRCLE','8','PROFILE','10',f(e.cx),'20',f(e.cy),'30','0','40',f(e.r));
+    else if(e.t==='arc')o.push('0','ARC','8','PROFILE','10',f(e.cx),'20',f(e.cy),'30','0','40',f(e.r),'50',f((e.s+360)%360),'51',f((e.e+360)%360));
+    else{o.push('0','POLYLINE','8','PROFILE','66','1','10','0','20','0','30','0','70',e.closed?'1':'0'); e.pts.forEach(function(p){o.push('0','VERTEX','8','PROFILE','10',f(p[0]),'20',f(p[1]),'30','0');}); o.push('0','SEQEND','8','PROFILE');}
+  });
+  o.push('0','ENDSEC','0','EOF');
+  return o.join('\r\n')+'\r\n';
+}
+function exportFaceDXF(fe){
+  if(!fe||fe.type!=='face'||!fe.planar){toast('Pick a flat face to export'); return;}
+  var prof=faceProfile(fe);
+  if(!prof||!prof.ents.length){toast('That face’s outline couldn’t be traced'); return;}
+  var node=fe.mesh.userData.node, nm=(node&&node.name?baseName(node.name):(state.root?state.root.name:'Face'))+' face profile.dxf';
+  download(new Blob([dxfText(prof)],{type:'application/dxf'}),nm);
+  toast('Saved '+num(prof.w,1)+' × '+num(prof.h,1)+' mm profile'+(prof.holes?' with '+prof.holes+' cut-out'+(prof.holes>1?'s':''):''));
+}
+
+// ---------- STL export ----------
+function exportSTL(nodes,label){
+  var set=new Set(); (nodes||[]).forEach(function(n){meshesUnder(n).forEach(function(m){set.add(m);});});
+  var all=Array.from(set).filter(function(m){return m.userData.g;}), vis=all.filter(function(m){return m.visible;}), list=vis.length?vis:all;
+  if(!list.length){toast('Nothing to export'); return;}
+  var tris=0; list.forEach(function(m){tris+=m.geometry.getIndex().count/3;});
+  var buf=new ArrayBuffer(84+50*tris), dv=new DataView(buf), hdr='Exported from eDrawings Viewer, millimetres';
+  for(var i=0;i<80;i++)dv.setUint8(i,i<hdr.length?hdr.charCodeAt(i):32);
+  dv.setUint32(80,tris,true);
+  var o=84, a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3(), nrm=new THREE.Vector3(), e1=new THREE.Vector3();
+  function put(v){var w=dispVec(v); dv.setFloat32(o,w.x*1000,true); dv.setFloat32(o+4,w.y*1000,true); dv.setFloat32(o+8,w.z*1000,true); o+=12;}
+  list.forEach(function(m){
+    var pa=m.geometry.getAttribute('position'), ix=m.geometry.getIndex().array, W=m.matrixWorld;
+    for(var t=0;t<ix.length;t+=3){
+      a.fromBufferAttribute(pa,ix[t]).applyMatrix4(W); b.fromBufferAttribute(pa,ix[t+1]).applyMatrix4(W); c.fromBufferAttribute(pa,ix[t+2]).applyMatrix4(W);
+      nrm.subVectors(b,a).cross(e1.subVectors(c,a)).normalize();
+      put(nrm.multiplyScalar(0.001)); put(a); put(b); put(c); dv.setUint16(o,0,true); o+=2;
+    }
+  });
+  var nm=(label||(nodes.length===1?nodes[0].name:(state.root?state.root.name:'Model')))+'.stl';
+  download(new Blob([buf],{type:'model/stl'}),nm);
+  toast('Saved '+list.length+' bod'+(list.length===1?'y':'ies')+', '+fmtTris(tris)+(vis.length<all.length&&vis.length?' (visible only)':''));
+}
+
+// ---------- close the open file ----------
+function closeFile(){
+  if(!state.root)return;
+  clearModel();
+  state.root=null; state.model=null; state.fileKey=null; state.meshes=[];
+  $('title').textContent=DEFAULT_TITLE; $('stats').innerHTML=''; showWarn(''); $('preview').style.display='none';
+  ['btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnViews','btnExport','search','btnShowAll','btnHideSel','btnIsolate'].forEach(function(id){$(id).disabled=true;});
+  $('spanel').classList.remove('on'); updateMass(); $('btnClose').hidden=true;
+  $('empty').style.display=''; refreshRecent(); needsRender=true;
+}
+var DEFAULT_TITLE=$('title').textContent;
+$('btnClose').onclick=closeFile;
+
+// ---------- adjustable tree width ----------
+function setTreeW(w,save){
+  w=Math.round(Math.max(180,Math.min(w,Math.min(720,innerWidth*0.6))));
+  document.documentElement.style.setProperty('--tree-w',w+'px');
+  $('resizer').setAttribute('aria-valuenow',w);
+  if(save)setPref('treeW',w);
+}
+(function(){
+  var rz=$('resizer'), sw=parseInt(pref('treeW'),10); if(sw)setTreeW(sw,false);
+  var drag=null;
+  rz.addEventListener('pointerdown',function(e){drag={x:e.clientX,w:$('aside').getBoundingClientRect().width}; rz.setPointerCapture(e.pointerId); rz.classList.add('on'); e.preventDefault();});
+  rz.addEventListener('pointermove',function(e){if(drag)setTreeW(drag.w+e.clientX-drag.x,false);});
+  function end(){if(!drag)return; drag=null; rz.classList.remove('on'); setTreeW($('aside').getBoundingClientRect().width,true);}
+  rz.addEventListener('pointerup',end); rz.addEventListener('pointercancel',end);
+  rz.addEventListener('dblclick',function(){setTreeW(300,true);});
+  rz.addEventListener('keydown',function(e){var w=$('aside').getBoundingClientRect().width; if(e.key==='ArrowLeft'){e.preventDefault(); setTreeW(w-20,true);} else if(e.key==='ArrowRight'){e.preventDefault(); setTreeW(w+20,true);}});
+})();
+
+// ---------- rotation style ----------
+var rotateMode=pref('rotate')==='turntable'?'turntable':'free';
+$('selRotate').value=rotateMode;
+$('selRotate').onchange=function(){
+  rotateMode=this.value; setPref('rotate',rotateMode);
+  if(rotateMode==='turntable'){camera.up.set(0,1,0); controls.update(); needsRender=true;}
+};
+
+// ---------- update notice ----------
+function showUpdateNotice(){
+  if($('updNote'))return;
+  var d=document.createElement('div'); d.className='upd'; d.id='updNote'; d.setAttribute('role','status');
+  d.innerHTML='<span>A new version of the viewer is ready.</span>';
+  var b=document.createElement('button'); b.className='btn primary'; b.textContent='Reload'; b.onclick=function(){location.reload();};
+  var x=document.createElement('button'); x.className='btn'; x.textContent='Later'; x.onclick=function(){d.remove();};
+  d.appendChild(b); d.appendChild(x); document.body.appendChild(d);
+}
+
+window.__edv={faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
