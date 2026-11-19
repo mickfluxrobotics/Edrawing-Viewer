@@ -190,7 +190,47 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .settings{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:10px;margin-top:4px}
 .settings label{display:flex;align-items:center;gap:8px;font-size:13px}.settings select{font-size:13px;padding:3px 6px}
 .upd{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:45;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px 8px 14px;box-shadow:0 8px 24px rgba(0,0,0,.18);font-size:13px}
+.mwrap{position:relative;display:inline-flex}
+.mbtn svg,.tool svg,#btnMore svg{margin-left:4px;vertical-align:1px}
+.pop{position:absolute;top:calc(100% + 6px);left:0;z-index:35;min-width:250px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;gap:2px}
+.pop[hidden]{display:none}
+.pop-right{left:auto;right:0}
+.pop-item{display:flex;justify-content:space-between;align-items:center;gap:16px;width:100%;border:0;background:none;text-align:left;padding:7px 9px;border-radius:6px;cursor:pointer;font-size:13.5px;white-space:nowrap}
+.pop-item span:first-child{overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.pop-item:hover:not(:disabled),.pop-item:focus-visible{background:var(--panel-2)}
+.pop-item:disabled{opacity:.45;cursor:default}
+.pop-item.quiet{color:var(--muted);font-size:12.5px}
+.pop-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:4px 9px;font-size:13.5px}
+.pop-row select{font-size:13px;padding:4px 6px}
+.pop-chk{padding:6px 9px}
+.pop-sep{height:1px;background:var(--line);margin:4px 2px}
+.pop-title{font-size:11.5px;font-weight:600;color:var(--muted);padding:6px 9px 2px}
+.tree-actions{flex-wrap:nowrap}
+.tree-actions .btn{padding:4px 8px;font-size:12.5px}
+.fit2{position:absolute;top:106px;right:39px;z-index:2;padding:5px 7px;background:var(--panel)}
+.view.two-d .fit2{top:10px;right:12px}
+.paintp{width:min(330px,calc(100% - 24px))}
+.pform{display:flex;flex-direction:column;gap:6px;font-size:12.5px;margin:6px 0 4px}
+.pform label{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pgroup{display:flex;flex-direction:column;gap:4px}.pgroup span{display:flex;align-items:center;gap:5px}
+.pform input{width:58px;padding:3px 5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);font-variant-numeric:tabular-nums}
+.paintp .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.paintp .big{color:#2EA866;margin-top:6px}
+.plist{font-size:12px;margin-top:6px!important}.plist dt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.reportdlg{width:min(720px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto}
+.rp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin:8px 0}
+.rp-grid label,.rp-notes{display:flex!important;flex-direction:column;align-items:stretch!important;gap:3px!important;font-size:12.5px;margin:0!important}
+.rp-grid input,.rp-notes textarea{padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);font:inherit;font-size:13px;resize:vertical}
+.rp-tablebar{display:flex;justify-content:space-between;align-items:center;margin:12px 0 6px;font-size:12.5px;color:var(--muted)}
+.rp-table{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+.rp-table table{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-numeric:tabular-nums}
+.rp-table th{position:sticky;top:0;background:var(--panel-2);text-align:left;font-weight:600;padding:6px 8px;color:var(--muted)}
+.rp-table td{padding:5px 8px;border-top:1px solid var(--line)}
+.rp-table .n{text-align:right;white-space:nowrap}
+.rp-table select{font-size:12px;padding:2px 4px;max-width:150px}
 @media (max-width:760px){
+  .tool{display:none}
+  .rp-grid{grid-template-columns:1fr}
   .resizer{display:none}
   main{grid-template-columns:1fr}
   aside{position:absolute;z-index:5;left:0;top:0;bottom:0;width:min(86vw,340px);transform:translateX(-102%);transition:transform .18s;box-shadow:0 8px 30px rgba(0,0,0,.25)}
@@ -205,26 +245,44 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="brand-row">eDrawings Viewer<button class="btn icon close-file" id="btnClose" aria-label="Close file" title="Close file" hidden><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 2l6 6M8 2 2 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg> Close</button></span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 11)</small></div>
+    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 12)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
-      <span class="split"><button class="btn primary" id="btnOpen">Open file</button><button class="btn primary" id="btnRecent" aria-label="Recent files" title="Recent files" hidden><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span>
-      <button class="btn" id="btnFit" title="Zoom to fit (double-click the mouse wheel)" disabled>Fit</button>
-      <select class="btn" id="selView" aria-label="Standard view" disabled>
-        <option value="iso">Isometric</option><option value="front">Front</option><option value="back">Back</option>
-        <option value="top">Top</option><option value="bottom">Bottom</option><option value="right">Right</option><option value="left">Left</option>
-      </select>
-      <select class="btn" id="selProj" aria-label="Projection" disabled><option value="ortho">Orthographic</option><option value="persp">Perspective</option></select>
-      <select class="btn" id="selDisplay" aria-label="Display style" disabled><option value="shadedEdges">Shaded with edges</option><option value="shaded">Shaded</option><option value="hlr">Hidden lines removed</option><option value="wire">Wireframe</option></select>
-      <button class="btn" id="btnSection" aria-pressed="false" title="Section view" disabled>Section</button>
-      <button class="btn" id="btnMeasure" aria-pressed="false" title="Measure (M)" disabled>Measure</button>
-      <button class="btn" id="btnMass" aria-pressed="false" title="Mass properties" disabled>Mass</button>
-      <button class="btn" id="btnViews" title="Saved views" disabled>Views</button>
-      <button class="btn" id="btnExport" title="Snapshot, parts list or print" disabled>Export</button>
-      <select class="btn" id="selUnits" aria-label="Units">
-        <option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="in">in</option>
-      </select>
-      <button class="btn" id="btnHelp" aria-expanded="false" aria-controls="help">Controls</button>
+      <div class="mwrap"><button class="btn primary mbtn" id="mFile" aria-haspopup="true" aria-expanded="false">File <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pop" id="popFile" hidden>
+          <button class="pop-item" id="btnOpen">Open file…</button>
+          <div id="popRecent"></div>
+          <button class="pop-item" id="btnClose" hidden>Close file</button>
+          <button id="btnRecent" hidden></button>
+        </div>
+      </div>
+      <div class="mwrap"><button class="btn mbtn" id="mView" aria-haspopup="true" aria-expanded="false" disabled>View <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <div class="pop" id="popView" hidden>
+          <button class="pop-item" id="btnFit" disabled>Zoom to fit<span class="kbd">F or double-click wheel</span></button>
+          <label class="pop-row" id="lblView">Standard view <select class="btn" id="selView" disabled>
+            <option value="iso">Isometric</option><option value="front">Front</option><option value="back">Back</option>
+            <option value="top">Top</option><option value="bottom">Bottom</option><option value="right">Right</option><option value="left">Left</option></select></label>
+          <label class="pop-row" id="lblProj">Projection <select class="btn" id="selProj" disabled><option value="ortho">Orthographic</option><option value="persp">Perspective</option></select></label>
+          <label class="pop-row" id="lblDisplay">Display <select class="btn" id="selDisplay" disabled><option value="shadedEdges">Shaded with edges</option><option value="shaded">Shaded</option><option value="hlr">Hidden lines removed</option><option value="wire">Wireframe</option></select></label>
+          <div id="modelOpts"></div>
+          <div class="pop-sep"></div>
+          <button class="pop-item" id="btnViews" disabled>Saved views…</button>
+        </div>
+      </div>
+      <button class="btn tool" id="btnMeasure" aria-pressed="false" title="Measure (M)" disabled>Measure</button>
+      <button class="btn tool" id="btnSection" aria-pressed="false" title="Section view" disabled>Section</button>
+      <button class="btn tool" id="btnMass" aria-pressed="false" title="Mass properties" disabled>Mass</button>
+      <button class="btn tool" id="btnPaint" aria-pressed="false" title="Outside surface area for painting or coating" disabled>Paint area</button>
+      <button class="btn tool" id="btnExport" title="Snapshot, parts list, STL, DXF, print or report" disabled>Export <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="btn only-narrow" id="btnMore">More <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="mwrap"><button class="btn icon mbtn" id="mSettings" aria-haspopup="true" aria-expanded="false" aria-label="Settings" title="Settings"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
+        <div class="pop pop-right" id="popSettings" hidden>
+          <label class="pop-row">Units <select class="btn" id="selUnits"><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option><option value="in">in</option></select></label>
+          <label class="pop-row">Rotation <select class="btn" id="selRotate"><option value="free">Free</option><option value="turntable">Turntable</option></select></label>
+          <label class="chk pop-chk"><input type="checkbox" id="revZoom"> Reverse scroll zoom</label>
+        </div>
+      </div>
+      <button class="btn icon" id="btnHelp" aria-expanded="false" aria-controls="help" aria-label="Help: controls and shortcuts" title="Help: controls and shortcuts"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="17.2" r="1.1" fill="currentColor"/></svg></button>
     </div>
     <input type="file" id="file" accept=".easm,.eprt,.step,.stp,.stl,.3mf,.dxf,.dwg,.EASM,.EPRT,.STEP,.STP,.STL,.3MF,.DXF,.DWG" hidden>
   </header>
@@ -234,7 +292,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         <input type="search" id="search" placeholder="Find a part" aria-label="Find a part" disabled>
         <div class="tree-actions">
           <button class="btn" id="btnShowAll" disabled>Show all</button>
-          <button class="btn" id="btnHideSel" disabled>Hide selected</button>
+          <button class="btn" id="btnHideSel" title="Hide selected (H)" disabled>Hide</button>
           <button class="btn" id="btnIsolate" disabled>Isolate</button>
           <button class="btn icon" id="btnUndo" aria-label="Undo (Ctrl+Z)" title="Undo (Ctrl+Z)" disabled><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 3 2 6l3 3M2.5 6H9a3 3 0 0 1 0 6H6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <button class="btn icon" id="btnRedo" aria-label="Redo (Ctrl+Y)" title="Redo (Ctrl+Y)" disabled><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9 3l3 3-3 3M11.5 6H5a3 3 0 0 0 0 6h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -257,6 +315,8 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <div class="panel" id="mpanel" aria-live="polite"></div>
       <div class="panel" id="spanel" aria-live="polite"></div>
       <div class="props" id="ppanel" aria-live="polite"></div>
+      <div class="props paintp" id="paintpanel" aria-live="polite"></div>
+      <button class="btn icon fit2" id="btnFit2" title="Zoom to fit (F)" aria-label="Zoom to fit" style="display:none"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="secpanel" id="secpanel" hidden>
         <select class="btn" id="secAxis" aria-label="Section plane"><option value="front">Front plane</option><option value="top">Top plane</option><option value="right">Right plane</option><option value="face" id="secFace">Selected flat face</option></select>
         <input type="range" id="secSlider" min="0" max="1000" value="500" aria-label="Section position">
@@ -267,14 +327,22 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <div class="stats" id="stats"></div>
       <div class="help" id="help" hidden>
         <h2>Controls</h2>
+        <h3>Menus</h3>
+        <dl>
+          <dt>File</dt><dd>Open file, recent files and Close file.</dd>
+          <dt>View</dt><dd>Zoom to fit, standard views, projection, display style, saved views, and for some files the File units and Up axis.</dd>
+          <dt>Tools</dt><dd>Measure, Section, Mass and Paint area stay on the toolbar. Export holds snapshots, reports, parts lists, STL, DXF and printing.</dd>
+          <dt>Settings</dt><dd>The gear icon: measurement units, rotation style (Free or Turntable) and reverse scroll zoom.</dd>
+          <dt>Narrow windows</dt><dd>The tools fold into a More menu.</dd>
+        </dl>
         <h3>Mouse</h3>
         <dl>
           <dt>Select</dt><dd>Click a part. Shift + click adds or removes parts. Drag a box left to right to take parts fully inside it, or right to left to take everything it touches. Shift + drag adds to the selection.</dd>
           <dt>Right-click</dt><dd>Opens a menu for what’s under the pointer: Hide, Isolate, Zoom to, Make transparent, Measure from here, Show all, Undo and Redo. Right-clicking a name in the tree works too. Right-drag still pans.</dd>
-          <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad. Start the drag on the model and it turns about that point. With Rotation set to Free (at the bottom of this panel) you can tumble the model all the way round in any direction; Turntable keeps the model upright. The view cube or a standard view sets it upright again.</dd>
+          <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad. Start the drag on the model and it turns about that point. With Rotation set to Free (in Settings, the gear icon) you can tumble the model all the way round; Turntable keeps it upright. The view cube or a standard view sets it upright again.</dd>
           <dt>Pan</dt><dd>Ctrl + drag, or right-drag.</dd>
           <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + middle-drag also zooms.</dd>
-          <dt>Zoom to fit</dt><dd>Double-click the mouse wheel, or the Fit button.</dd>
+          <dt>Zoom to fit</dt><dd>Double-click the mouse wheel, press F over empty space, use the Fit icon under the view cube, or View, Zoom to fit.</dd>
         </dl>
         <h3>Hiding parts</h3>
         <dl>
@@ -286,13 +354,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         </dl>
         <h3>Views</h3>
         <dl>
-          <dt>View cube</dt><dd>Top right. Click a face for a standard view, or an edge or corner for the views between them.</dd>
+          <dt>View cube</dt><dd>Top right. Click a face for a standard view, or an edge or corner for the views between them. The icon below it zooms to fit.</dd>
           <dt>Normal to</dt><dd>F turns the view square-on to the flat face under the pointer, or to the last flat face picked in Measure. With no flat face, it snaps to the nearest standard view.</dd>
-          <dt>Standard views</dt><dd>The view menu, or Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app).</dd>
+          <dt>Standard views</dt><dd>View, Standard view, or Ctrl + 1 Front, 2 Back, 3 Left, 4 Right, 5 Top, 6 Bottom, 7 Isometric (in the installed app).</dd>
           <dt>Section</dt><dd>Section cuts the model with a plane: pick Front, Top or Right, or a flat face you picked in Measure, then drag the slider through the model. Flip keeps the other side. The cut is shown hollow, and you can’t select what the section removes.</dd>
-          <dt>Saved views</dt><dd>Views saves the camera angle with what’s hidden and transparent, under a name, for this file on this device. Click a name to go back to it (Ctrl + Z returns to how things were).</dd>
-          <dt>Display</dt><dd>Shaded with edges, Shaded, Hidden lines removed or Wireframe.</dd>
-          <dt>Projection</dt><dd>Orthographic (the SolidWorks default) or Perspective.</dd>
+          <dt>Saved views</dt><dd>View, Saved views stores the camera angle with what’s hidden and transparent, under a name, for this file on this device. Click a name to go back to it (Ctrl + Z returns to how things were).</dd>
+          <dt>Display</dt><dd>View, Display: Shaded with edges, Shaded, Hidden lines removed or Wireframe.</dd>
+          <dt>Projection</dt><dd>View, Projection: Orthographic (the SolidWorks default) or Perspective.</dd>
         </dl>
         <h3>Measure</h3>
         <dl>
@@ -300,6 +368,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Copy</dt><dd>The Copy button, or Ctrl + C, copies just the number, ready to paste: for example 381.00 for a hole of Ø 381.00 mm. A single point copies its X, Y and Z.</dd>
           <dt>Drawing snaps</dt><dd>In DXF and DWG drawings the pointer snaps to end points (diamond), midpoints (triangle, when you’re close), circle and arc centres (ring) and intersections (cross).</dd>
           <dt>Mass</dt><dd>Choose the units at the bottom of the panel: volume in mm³, litres or m³, area in mm² or m², mass in g or kg (Auto follows the toolbar units). Mass properties saved in an eDrawings file for the whole model, and volume with an estimated mass for selected parts. For STEP, STL and 3MF everything is estimated from the geometry. In drawings this button is Properties: size and total line length (the cut length of a flat pattern).</dd>
+        </dl>
+        <h3>Paint area and coating report</h3>
+        <dl>
+          <dt>Paint area</dt><dd>Works out the outside surface area, the area a coater would paint. Select the weldments or parts to include first (otherwise everything visible is used), then press Calculate. Counted surfaces turn green and everything else grey.</dd>
+          <dt>What isn’t counted</dt><dd>Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than the gap setting. Hollow tubes with openings up to the size you set (110 × 110 mm to start with) are capped (shown in orange) unless shorter than the minimum length (150 mm), so their insides aren’t counted.</dd>
+          <dt>Accuracy</dt><dd>Fast, Normal or Fine sets the grid used to decide what’s inside and outside. Areas always come from the model’s real surfaces. Big selections use a coarser grid automatically, and the panel says how big a gap that closes.</dd>
+          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater with each item’s quantity, material, outside size, area and estimated weight, a picture of each item with the coated surfaces in green, and how the area was worked out. Choose materials in the report window; they’re remembered by part name. A CSV of the same table is there too.</dd>
         </dl>
         <h3>Export</h3>
         <dl>
@@ -311,14 +386,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         </dl>
         <h3>Files</h3>
         <dl>
-          <dt>Close</dt><dd>The Close button next to the viewer’s name closes the file and frees its memory.</dd>
+          <dt>Close</dt><dd>File, Close file closes the file and frees its memory.</dd>
           <dt>Parts list width</dt><dd>Drag the edge of the parts list to make it wider or narrower. Double-click the edge to reset it.</dd>
-          <dt>File types</dt><dd>eDrawings (.easm, .eprt), STEP (.step, .stp), STL and 3MF open in 3D; DXF and DWG open flat, in 2D. STEP and DWG are converted on this device first; if the converter stumbles, the viewer tries once more by itself. STL has no units, so set File units in the bottom-right corner. If a model lies on its back, switch Up between Z and Y there.</dd>
-          <dt>Recent files</dt><dd>The arrow next to Open file, or the list on the start screen, reopens files with one click. This works in Chrome, for files opened with Open file, dragged in, or opened from the Files app. Chrome may ask for permission the first time. If a device can’t reopen saved files, the viewer switches this off and tells you.</dd>
+          <dt>File types</dt><dd>eDrawings (.easm, .eprt), STEP (.step, .stp), STL and 3MF open in 3D; DXF and DWG open flat, in 2D. STEP and DWG are converted on this device first; if the converter stumbles, the viewer tries once more by itself. STL has no units, so set File units in the View menu. If a model lies on its back, switch Up between Z and Y in the View menu.</dd>
+          <dt>Recent files</dt><dd>File menu, or the list on the start screen, reopens files with one click. This works in Chrome, for files opened with Open file, dragged in, or opened from the Files app. Chrome may ask for permission the first time. If a device can’t reopen saved files, the viewer switches this off and tells you.</dd>
           <dt>Drawings</dt><dd>The tree lists layers. Click, Shift + click or drag a box to select lines, arcs and text. Middle-drag pans and scroll zooms. DWG files from AutoCAD R13 to 2018 are supported.</dd>
         </dl>
-        <div class="settings"><label>Rotation <select class="btn" id="selRotate"><option value="free">Free</option><option value="turntable">Turntable</option></select></label>
-        <label class="chk"><input type="checkbox" id="revZoom"> Reverse scroll zoom</label></div>
+        <p class="hint">Units, rotation style and scroll direction are in Settings (the gear icon).</p>
       </div>
       <div class="busy" id="busy" role="status" aria-live="polite">
         <div class="busy-card"><img id="preview" alt="Model preview"><div><div id="busyText">Opening…</div><div class="bar"><i id="busyBar"></i></div></div></div>
@@ -345,6 +419,21 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
   </div>
   <div class="mk-stage"><canvas id="mkCanvas"></canvas></div>
 </div>
+<div class="printdlg reportdlg" id="reportDlg" hidden role="dialog" aria-label="Coating report">
+  <h2>Coating report</h2>
+  <p class="hint" id="rpSummary"></p>
+  <div class="rp-grid">
+    <label>Your company <input id="rpCompany" type="text" placeholder="Company name"></label>
+    <label>Contact <input id="rpContact" type="text" placeholder="Name, phone, email"></label>
+    <label>Job or reference <input id="rpJob" type="text" placeholder="Order or job number"></label>
+    <label>Coating <input id="rpCoating" type="text" placeholder="Colour and finish"></label>
+  </div>
+  <label class="rp-notes">Notes for the coater <textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea></label>
+  <div class="rp-tablebar"><span>Materials (remembered by part name)</span><select class="btn" id="rpAll" aria-label="Set the material for every item"></select></div>
+  <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n">m² each</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
+  <label class="chk"><input type="checkbox" id="rpPics" checked> Include a picture of each item</label>
+  <div class="acts"><button class="btn" id="rpCancel">Cancel</button><button class="btn" id="rpCsv">Download CSV</button><button class="btn primary" id="rpPdf">Create PDF</button></div>
+</div>
 <div class="printdlg" id="printDlg" hidden role="dialog" aria-label="Print or save as PDF">
   <h2>Print or save as PDF</h2>
   <label>Paper <select class="btn" id="prPaper"><option>A4</option><option selected>A3</option><option>A2</option><option>A1</option><option>Letter</option></select></label>
@@ -358,14 +447,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 </div>
 <div id="printArea"></div>
 <style id="pageStyle"></style>
-<script src="three.min.js?v=11"></script>
-<script src="OrbitControls.js?v=11"></script>
-<script src="LineSegmentsGeometry.js?v=11"></script>
-<script src="LineMaterial.js?v=11"></script>
-<script src="LineSegments2.js?v=11"></script>
-<script src="fflate.js?v=11"></script>
-<script src="easm-core.js?v=11"></script>
-<script src="formats.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="three.min.js?v=12"></script>
+<script src="OrbitControls.js?v=12"></script>
+<script src="LineSegmentsGeometry.js?v=12"></script>
+<script src="LineMaterial.js?v=12"></script>
+<script src="LineSegments2.js?v=12"></script>
+<script src="fflate.js?v=12"></script>
+<script src="easm-core.js?v=12"></script>
+<script src="formats.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>

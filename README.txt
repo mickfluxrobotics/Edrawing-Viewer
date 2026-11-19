@@ -1,4 +1,4 @@
-eDrawings Viewer (version 11)
+eDrawings Viewer (version 12)
 
 Version 10 adds undo/redo, right-click menus, transparency, a view cube, section view, saved views,
 parts list export, snapshots with markup, recent files, printing for drawings and extra drawing snaps.
@@ -11,4 +11,5 @@ Third-party parts, each under its own licence (see the LICENSE files):
 - three.js (MIT), fflate (MIT)
 - occt-import-js and OpenCascade (LGPL-2.1) for STEP
 - dwgdxf / acadrust (MIT) for DWG
+- jsPDF (MIT) for the coating report
 - Hershey single-stroke font (free to use) for DXF/DWG text

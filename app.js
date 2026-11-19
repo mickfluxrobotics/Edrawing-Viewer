@@ -142,7 +142,8 @@ function styleMesh(m){
   var lines=displayMode==='wire'||displayMode==='hlr', sel=!!m.userData.sel, hov=!!m.userData.hov, tr=!!m.userData.trans;
   if(displayMode==='wire')m.material=hiddenMat;
   else if(displayMode==='hlr')m.material=tr?hiddenMat:hlrMat;
-  else m.material=sel?selMat:(hov?hovMat:(tr?transMat(m.userData.base):m.userData.base));
+  else m.material=sel?selMat:(hov?hovMat:(state.paintView?(m.userData.paintIn?paintGreyMat:transMat(m.userData.base)):(tr?transMat(m.userData.base):m.userData.base)));
+  var pov=m.userData.paintOv, pvis=!!state.paintView&&m.visible&&!sel&&!hov; if(pov)pov.visible=pvis; if(m.userData.paintPart)m.userData.paintPart.visible=pvis;
   var ed=m.userData.edges;
   if(ed){ed.material=((sel||hov)&&lines)?selEdgeMat:(tr?edgeFaintMat:edgeMat); ed.visible=m.visible&&displayMode!=='shaded';}
 }
@@ -264,6 +265,7 @@ async function convertDwg(buf){
 }
 var geomCache=new Map();
 function clearModel(){
+  if(paint.on)setPaint(false); clearPaint();
   hoverNode(null); closeMenu(); setSection(false); $('printDlg').hidden=true;
   clearAll(); setMeasuring(false); resetUndo();
   if(state.is2d)setMode2d(false);
@@ -358,7 +360,7 @@ function finishBuild(rootNode,statsHtml){
   }
   applyModelTransform();
   renderTree(rootNode); applyVisibility();
-  ['btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnViews','btnExport','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
+  ['mView','btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnPaint','btnViews','btnExport','search','btnShowAll'].forEach(function(id){$(id).disabled=false;});
   if(pendingRecent){addRecent(pendingRecent.handle,pendingRecent.name); pendingRecent=null;}
   $('btnClose').hidden=false;
   $('empty').style.display='none';
@@ -379,11 +381,12 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>'+(extra?'<span class="opts">'+extra+'</span> ':'')+'viewer version 11';
+  st.innerHTML=html+'<br>viewer version 12';
+  $('modelOpts').innerHTML=extra?'<div class="pop-sep"></div>'+extra.replace(/<label>/g,'<label class="pop-row">').replace(/<select /g,'<select class="btn" '):'';
   var fu=$('selFileUnit');
-  if(fu)fu.onchange=function(){state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
+  if(fu)fu.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
   var su=$('selUp');
-  if(su)su.onchange=function(){state.up=this.value; if(state.fileKind==='stl')setPref('up.stl',this.value); clearMeasure(); applyModelTransform(); setView('iso'); updateMass();};
+  if(su)su.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.up=this.value; if(state.fileKind==='stl')setPref('up.stl',this.value); clearMeasure(); applyModelTransform(); setView('iso'); updateMass();};
 }
 
 // ---------- STL, 3MF and STEP ----------
@@ -450,7 +453,8 @@ function setMode2d(on){
   state.is2d=on; view.classList.toggle('two-d',on);
   controls.enableRotate=!on;
   controls.touches.ONE=on?THREE.TOUCH.PAN:THREE.TOUCH.ROTATE;
-  ['selView','selProj','selDisplay','btnSection'].forEach(function(id){$(id).hidden=on;});
+  ['lblView','lblProj','lblDisplay','btnSection','btnPaint'].forEach(function(id){$(id).hidden=on;});
+  if(on&&paint.on)setPaint(false);
   $('btnMass').textContent=on?'Properties':'Mass';
   if(on){state.prevProj=camera===ortho?'ortho':'persp'; setProjection('ortho',true); camera.up.set(0,1,0);}
   else if(state.prevProj==='persp')setProjection('persp',true);
@@ -733,7 +737,7 @@ function setSelection(nodes,opts){
   state.sel.forEach(function(n){if(n.row)n.row.classList.add('sel');});
   if(state.sel.length===1&&state.sel[0].row&&!(opts&&opts.noScroll)){expandTo(state.sel[0]); state.sel[0].row.scrollIntoView({block:'nearest'});}
   $('btnHideSel').disabled=!state.sel.length; $('btnIsolate').disabled=!state.sel.length;
-  showSelInfo(); updateMass(); needsRender=true;
+  showSelInfo(); updateMass(); if(paint&&paint.on&&!$('paintpanel').contains(document.activeElement))renderPaintPanel(); needsRender=true;
 }
 function select(n){setSelection(n?[n]:[]);}
 function toggleSelect(n){
@@ -897,7 +901,7 @@ function updateMass(){
   var sd=$('selDensity'); if(sd)sd.onchange=function(){densityKey=this.value; try{localStorage.setItem('edv.density',densityKey);}catch(e){} updateMass();};
   comEl.style.display=state.comAt?'':'none'; needsRender=true;
 }
-$('btnMass').onclick=function(){state.massOn=!state.massOn; this.setAttribute('aria-pressed',state.massOn); updateMass();};
+$('btnMass').onclick=function(){state.massOn=!state.massOn; if(state.massOn&&paint.on)setPaint(false); this.setAttribute('aria-pressed',state.massOn); updateMass();};
 
 // ---------- camera ----------
 function boxOf(list){
@@ -1401,6 +1405,8 @@ document.addEventListener('keydown',function(e){
     return;
   }
   if(e.key==='Escape'&&menuEl){closeMenu(); return;}
+  if(e.key==='Escape'&&!$('reportDlg').hidden){$('reportDlg').hidden=true; return;}
+  if(e.key==='Escape'&&document.querySelector('.pop:not([hidden])')){closePops(); return;}
   if(e.key==='Escape'&&!$('printDlg').hidden){$('printDlg').hidden=true; return;}
   if(e.key==='Escape'){
     if(typing&&t.id==='search'){t.blur();}
@@ -1617,6 +1623,7 @@ function buildCube(){
 buildCube();
 function renderCube(){
   if(!cubeWrap||!cubeR)return;
+  var f2=$('btnFit2'); if(f2)f2.style.display=state.meshes.length?'':'none';
   if(state.is2d||!state.meshes.length){cubeWrap.style.display='none'; return;}
   cubeWrap.style.display='';
   var d=camera.position.clone().sub(controls.target).normalize();
@@ -1735,7 +1742,7 @@ function applyView(v){
   updateClip(); controls.update(); needsRender=true; toast('View “'+v.name+'” restored');
 }
 function viewsMenu(){
-  var btn=$('btnViews'), list=loadViews(), items=[];
+  var btn=$('mView'), list=loadViews(), items=[];
   list.forEach(function(v,i){
     var row=document.createElement('div'); row.className='menu-row';
     var b=document.createElement('button'); b.className='menu-item'; b.textContent=v.name; b.onclick=function(){closeMenu(); applyView(v);};
@@ -1799,7 +1806,11 @@ async function openRecent(r){
 }
 function refreshRecent(){
   var list=recentOff()?[]:recentNames();
-  $('btnRecent').hidden=!list.length;
+  $('btnRecent').hidden=true;
+  var pr=$('popRecent'); pr.innerHTML='';
+  if(list.length){var ph=document.createElement('div'); ph.className='pop-title'; ph.textContent='Recent'; pr.appendChild(ph);
+    list.slice(0,8).forEach(function(r){var b=document.createElement('button'); b.className='pop-item'; b.innerHTML='<span></span><span class="kbd"></span>'; b.firstChild.textContent=r.name; b.lastChild.textContent=ago(r.time); b.onclick=function(){closePops(); openRecent(r);}; pr.appendChild(b);});
+    var cl=document.createElement('button'); cl.className='pop-item quiet'; cl.textContent='Clear recent files'; cl.onclick=function(){closePops(); setRecentNames([]); refreshRecent(); rtx('readwrite',function(s2){s2.clear();}).catch(function(){});}; pr.appendChild(cl);}
   var box=$('recentList'); box.innerHTML='';
   box.hidden=!list.length;
   if(list.length){
@@ -1902,11 +1913,12 @@ $('mkCopy').onclick=function(){
 };
 
 // ---------- export menu ----------
-$('btnExport').onclick=function(){
+function exportMenu(anchor){
   var items=[{label:'Snapshot with markup…',action:openMarkup}];
   if(state.is2d)items.push({label:'Print or save as PDF…',action:openPrint});
   else{
     items.push({sep:true});
+    items.push({label:'Coating report (paint area)…',disabled:!paint.res,hint:paint.res?'':'use Paint area first',action:openReport});
     items.push({label:'Parts list (CSV)',action:function(){exportParts(false);}});
     items.push({label:'Parts list, visible parts only (CSV)',action:function(){exportParts(true);}});
     items.push({label:'Copy parts list for a spreadsheet',action:function(){exportParts(false,true);}});
@@ -1915,8 +1927,9 @@ $('btnExport').onclick=function(){
     items.push({label:'STL of everything visible',action:function(){exportSTL([state.root],state.root.name);}});
     var lf=lastFlatFace(); items.push({label:'Face as DXF profile',disabled:!lf,hint:lf?'':'pick a flat face in Measure',action:function(){exportFaceDXF(lf);}});
   }
-  menuBelow(this,items,'Export');
-};
+  menuBelow(anchor,items,'Export');
+}
+$('btnExport').onclick=function(){exportMenu(this);};
 
 // ---------- print / PDF for drawings ----------
 var PAPER={A4:[210,297],A3:[297,420],A2:[420,594],A1:[594,841],Letter:[215.9,279.4]};
@@ -2130,7 +2143,7 @@ function closeFile(){
   clearModel();
   state.root=null; state.model=null; state.fileKey=null; state.meshes=[];
   $('title').textContent=DEFAULT_TITLE; $('stats').innerHTML=''; showWarn(''); $('preview').style.display='none';
-  ['btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnViews','btnExport','search','btnShowAll','btnHideSel','btnIsolate'].forEach(function(id){$(id).disabled=true;});
+  ['mView','btnFit','selView','selProj','selDisplay','btnSection','btnMeasure','btnMass','btnPaint','btnViews','btnExport','search','btnShowAll','btnHideSel','btnIsolate'].forEach(function(id){$(id).disabled=true;});
   $('spanel').classList.remove('on'); updateMass(); $('btnClose').hidden=true;
   $('empty').style.display=''; refreshRecent(); needsRender=true;
 }
@@ -2173,5 +2186,322 @@ function showUpdateNotice(){
   d.appendChild(b); d.appendChild(x); document.body.appendChild(d);
 }
 
-window.__edv={faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+
+// =====================================================================
+// ---------- paint area (outside surfaces only) ----------
+var paintMat=new THREE.MeshPhongMaterial({color:0x2EA866,side:THREE.DoubleSide,shininess:30});
+var paintGreyMat=new THREE.MeshPhongMaterial({color:0xC6CCD2,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1,shininess:20});
+var capMat=new THREE.MeshBasicMaterial({color:0xF08A24,transparent:true,opacity:0.75,side:THREE.DoubleSide,depthTest:true});
+paintMat.clippingPlanes=clipPlanes; paintGreyMat.clippingPlanes=clipPlanes;
+var paint={on:false,res:null,ovs:[],parts:[],caps:null,worker:null,running:false};
+var PAINT_ACC={fast:{targetH:6,budget:1.5e7,label:'Fast'},normal:{targetH:3,budget:4e7,label:'Normal'},fine:{targetH:1.5,budget:8e7,label:'Fine'}};
+function paintSettings(){
+  var g=function(k,d){var v=parseFloat(pref('paint.'+k)); return isFinite(v)&&v>=0?v:d;};
+  return {gap:g('gap',3),capW:g('capW',110),capH:g('capH',110),minLen:g('minLen',150),acc:pref('paint.acc')||'normal'};
+}
+function partNodes(){
+  var parts=[];
+  (function rec(n,on){
+    var v=on&&n.visible; if(!v)return;
+    var isPart=!n.isBody&&n.meshes.length>0&&(!n.children.length||n.children.every(function(c){return c.isBody;}));
+    if(n===state.root&&n.children.length&&n.children.every(function(c){return c.isBody;}))isPart=true;
+    if(isPart&&(n!==state.root||!n.children.length||n.children.every(function(c){return c.isBody;}))){parts.push(n); return;}
+    n.children.forEach(function(c){rec(c,v);});
+  })(state.root,true);
+  return parts;
+}
+function paintScope(){
+  if(state.sel.length)return {nodes:state.sel.slice(),label:state.sel.length===1?state.sel[0].name:state.sel.length+' selected items',selected:true};
+  return {nodes:partNodes(),label:'everything visible',selected:false};
+}
+function setPaint(on){
+  paint.on=on&&!state.is2d&&state.meshes.length>0;
+  $('btnPaint').setAttribute('aria-pressed',paint.on);
+  if(paint.on&&state.massOn){$('btnMass').click();}
+  renderPaintPanel(); applyPaintView();
+}
+$('btnPaint').onclick=function(){setPaint(!paint.on);};
+function applyPaintView(){
+  state.paintView=paint.on&&!!paint.res&&$('paintShow')&&$('paintShow').checked;
+  state.meshes.forEach(styleMesh);
+  if(paint.caps)paint.caps.visible=!!state.paintView;
+  needsRender=true;
+}
+function clearPaint(){
+  paint.ovs.forEach(function(o){modelRoot.remove(o); o.geometry.dispose();}); paint.ovs=[];
+  paint.parts.forEach(function(o){scene.remove(o); o.geometry.dispose();}); paint.parts=[];
+  if(paint.caps){scene.remove(paint.caps); paint.caps.traverse(function(o){if(o.geometry)o.geometry.dispose();}); paint.caps=null;}
+  state.meshes.forEach(function(m){m.userData.paintIn=false; m.userData.paintOv=null; m.userData.paintPart=null;});
+  paint.res=null; state.paintView=false;
+  if(paint.worker){paint.worker.terminate(); paint.worker=null;} paint.running=false;
+  state.meshes.forEach(styleMesh); needsRender=true;
+}
+function renderPaintPanel(){
+  var pp=$('paintpanel');
+  if(!paint.on){pp.classList.remove('on'); return;}
+  var st=paintSettings(), sc=paintScope(), r=paint.res, h='';
+  h+='<h2>Paint area</h2>';
+  if(r)h+='<p class="sub">Results for '+esc(r.scope)+'. '+(sc.label!==r.scope?'Recalculate to use '+esc(sc.label)+' instead.':'')+'</p>';
+  else h+='<p class="sub">Outside surfaces only, for '+esc(sc.label)+(sc.selected?'':' (select parts first to limit it)')+'.</p>';
+  h+='<div class="pform"><label>Close gaps up to <input type="number" id="pGap" min="0" max="50" step="0.5" value="'+st.gap+'"> mm</label>';
+  h+='<div class="pgroup"><span>Cap tube openings up to</span><span><input type="number" id="pCapW" min="0" step="1" value="'+st.capW+'" aria-label="Largest opening width"> × <input type="number" id="pCapH" min="0" step="1" value="'+st.capH+'" aria-label="Largest opening height"> mm</span><span>unless shorter than <input type="number" id="pMinLen" min="0" step="1" value="'+st.minLen+'"> mm</span></div>';
+  h+='<label>Accuracy <select class="btn" id="pAcc">'+Object.keys(PAINT_ACC).map(function(k){return '<option value="'+k+'"'+(k===st.acc?' selected':'')+'>'+PAINT_ACC[k].label+'</option>';}).join('')+'</select></label></div>';
+  h+='<div class="acts"><button class="btn primary" id="pRun"'+(paint.running?' disabled':'')+'>'+(r?'Recalculate':'Calculate')+'</button>'+(r?'<button class="btn" id="pReport">Coating report…</button><button class="btn" id="pClear">Clear</button>':'')+'</div>';
+  h+='<p class="hint" id="pProg">'+(paint.running?'Working…':'')+'</p>';
+  if(r){
+    h+='<div class="big">'+fmtArea(r.total/1e6)+'</div>';
+    h+='<p class="sub">painted, out of '+fmtArea(r.all/1e6)+' of surface in '+r.items.length+' item'+(r.items.length===1?'':'s')+'.</p>';
+    h+='<label class="chk"><input type="checkbox" id="paintShow"'+(state.paintView!==false?' checked':'')+'> Show counted surfaces in green</label>';
+    var t=r.tubes; h+='<p class="hint">'+(t.capped?t.capped+' tube'+(t.capped>1?'s':'')+' capped (orange)':'No tubes capped')+(t.shortOpen?', '+t.shortOpen+' short tube'+(t.shortOpen>1?'s':'')+' left open':'')+(t.tooBig?', '+t.tooBig+' larger than the rule left open':'')+'. Grid '+num(r.grid.h,1)+' mm, so gaps up to about '+num(Math.max(r.grid.closes,st.gap),0)+' mm were closed.</p>';
+    var list=r.items.slice().sort(function(a,b){return b.counted-a.counted;}), top=list.slice(0,8);
+    h+='<dl class="plist">'+top.map(function(it){return '<dt>'+esc(it.name)+'</dt><dd>'+fmtArea(it.counted/1e6)+'</dd>';}).join('')+'</dl>';
+    if(list.length>8)h+='<p class="hint">and '+(list.length-8)+' more in the coating report.</p>';
+  }
+  pp.innerHTML=h; pp.classList.add('on');
+  function keep(id,key){$(id).onchange=function(){setPref('paint.'+key,this.value);};}
+  keep('pGap','gap'); keep('pCapW','capW'); keep('pCapH','capH'); keep('pMinLen','minLen'); keep('pAcc','acc');
+  $('pRun').onclick=runPaint;
+  if(r){$('pClear').onclick=function(){clearPaint(); renderPaintPanel();}; $('pReport').onclick=openReport; $('paintShow').onchange=applyPaintView;}
+}
+function runPaint(){
+  if(paint.running)return;
+  var st=paintSettings(), sc=paintScope(), acc=PAINT_ACC[st.acc]||PAINT_ACC.normal;
+  var claimed=new Set(), items=[], bodies=[], map=[];
+  sc.nodes.forEach(function(n){
+    var ms=meshesUnder(n).filter(function(m){return m.visible&&m.userData.g&&!claimed.has(m);});
+    if(!ms.length)return;
+    var it={node:n,name:n.name,meshes:ms,counted:0,area:0};
+    items.push(it);
+    ms.forEach(function(m){
+      claimed.add(m);
+      var pa=m.geometry.getAttribute('position'), W=m.matrixWorld, v=new THREE.Vector3(), pos=new Float32Array(pa.count*3);
+      for(var i=0;i<pa.count;i++){v.fromBufferAttribute(pa,i).applyMatrix4(W); pos[3*i]=v.x*1000; pos[3*i+1]=v.y*1000; pos[3*i+2]=v.z*1000;}
+      bodies.push({id:bodies.length,pos:pos,idx:new Uint32Array(m.geometry.getIndex().array)}); map.push({mesh:m,item:it});
+    });
+  });
+  if(!bodies.length){toast('Nothing visible to measure'); return;}
+  clearPaint(); paint.running=true; renderPaintPanel();
+  var t0=performance.now();
+  try{paint.worker=new Worker('paint-worker.js');}catch(e){paint.running=false; toast('Paint area needs the viewer opened from its web address'); renderPaintPanel(); return;}
+  paint.worker.onmessage=function(ev){
+    var d=ev.data;
+    if(d.progress!=null){var pg=$('pProg'); if(pg)pg.textContent=d.msg+'… '+Math.round(d.progress*100)+'%'; return;}
+    paint.worker.terminate(); paint.worker=null; paint.running=false;
+    if(d.error){toast('Paint area couldn’t be worked out: '+d.error); renderPaintPanel(); return;}
+    var res=d.result, all=0;
+    res.bodies.forEach(function(b,k){
+      var mp=map[k], m=mp.mesh, f=b.flags, ix=m.geometry.getIndex().array, keep=[];
+      mp.item.counted+=b.counted; mp.item.area+=b.area; all+=b.area;
+      for(var t=0;t<f.length;t++)if(f[t])keep.push(ix[3*t],ix[3*t+1],ix[3*t+2]);
+      m.userData.paintIn=true;
+      if(keep.length){
+        var g=new THREE.BufferGeometry(); g.setAttribute('position',m.geometry.getAttribute('position')); if(m.geometry.getAttribute('normal'))g.setAttribute('normal',m.geometry.getAttribute('normal'));
+        g.setIndex(new THREE.BufferAttribute(new Uint32Array(keep),1)); g.boundingSphere=m.geometry.boundingSphere; g.boundingBox=m.geometry.boundingBox;
+        var ov=new THREE.Mesh(g,paintMat); ov.matrixAutoUpdate=false; ov.matrix.copy(m.matrix); ov.raycast=function(){}; ov.visible=false;
+        modelRoot.add(ov); paint.ovs.push(ov); m.userData.paintOv=ov;
+      }
+      if(b.part&&b.part.length){   // split-up pieces of partly covered triangles (world coordinates)
+        var pg=new THREE.BufferGeometry(), pp=new Float32Array(b.part.length); for(var q=0;q<pp.length;q++)pp[q]=b.part[q]/1000;
+        pg.setAttribute('position',new THREE.BufferAttribute(pp,3)); pg.computeVertexNormals();
+        var pm=new THREE.Mesh(pg,paintMat); pm.raycast=function(){}; pm.visible=false; pm.renderOrder=1;
+        scene.add(pm); paint.parts.push(pm); m.userData.paintPart=pm;
+      }
+    });
+    modelRoot.updateMatrixWorld(true);
+    var grp=new THREE.Group();
+    res.caps.forEach(function(pts){
+      var n=pts.length/3, cx=0,cy=0,cz=0,i; for(i=0;i<n;i++){cx+=pts[3*i]; cy+=pts[3*i+1]; cz+=pts[3*i+2];} cx/=n; cy/=n; cz/=n;
+      var arr=[]; for(i=0;i<n;i++){var j=(i+1)%n; arr.push(cx,cy,cz,pts[3*i],pts[3*i+1],pts[3*i+2],pts[3*j],pts[3*j+1],pts[3*j+2]);}
+      var g2=new THREE.BufferGeometry(); g2.setAttribute('position',new THREE.BufferAttribute(new Float32Array(arr.map(function(x){return x/1000;})),3));
+      var cm=new THREE.Mesh(g2,capMat); cm.raycast=function(){}; grp.add(cm);
+    });
+    grp.visible=false; scene.add(grp); paint.caps=grp;
+    paint.res={items:items,total:res.counted,all:all,tubes:res.tubes,grid:res.grid,settings:st,secs:(performance.now()-t0)/1000,scope:sc.label};
+    state.paintView=true; renderPaintPanel(); applyPaintView();
+    toast('Painted area '+fmtArea(res.counted/1e6)+' (worked out in '+Math.max(1,Math.round(paint.res.secs))+' s)');
+  };
+  paint.worker.onerror=function(e){if(e.preventDefault)e.preventDefault(); paint.running=false; if(paint.worker){paint.worker.terminate(); paint.worker=null;} toast('Paint area stopped unexpectedly. Try Fast, or select fewer parts.'); renderPaintPanel();};
+  var tr=[]; bodies.forEach(function(b){tr.push(b.pos.buffer,b.idx.buffer);});
+  paint.worker.postMessage({bodies:bodies,gap:st.gap,capW:st.capW,capH:st.capH,minLen:st.minLen,targetH:acc.targetH,budget:acc.budget},tr);
+}
+
+// ---------- coating report ----------
+var MATS=[['steel','Mild steel',7850],['galv','Galvanised steel',7850],['stainless','Stainless steel',8000],['aluminium','Aluminium',2700],['brass','Brass',8500],['cast','Cast iron',7200]];
+function matInfo(k){for(var i=0;i<MATS.length;i++)if(MATS[i][0]===k)return MATS[i]; return null;}
+function eigSym(C){ // 3x3 symmetric (xx,yy,zz,xy,xz,yz): eigenvectors by Jacobi
+  var A=[[C[0],C[3],C[4]],[C[3],C[1],C[5]],[C[4],C[5],C[2]]],V=[[1,0,0],[0,1,0],[0,0,1]];
+  for(var it=0;it<50;it++){
+    var p=0,q=1,m=Math.abs(A[0][1]); if(Math.abs(A[0][2])>m){p=0;q=2;m=Math.abs(A[0][2]);} if(Math.abs(A[1][2])>m){p=1;q=2;m=Math.abs(A[1][2]);}
+    if(m<1e-12)break;
+    var th=(A[q][q]-A[p][p])/(2*A[p][q]),t=(th>=0?1:-1)/(Math.abs(th)+Math.sqrt(th*th+1)),c=1/Math.sqrt(t*t+1),s=t*c,k;
+    for(k=0;k<3;k++){var akp=A[k][p],akq=A[k][q]; A[k][p]=c*akp-s*akq; A[k][q]=s*akp+c*akq;}
+    for(k=0;k<3;k++){var apk=A[p][k],aqk=A[q][k]; A[p][k]=c*apk-s*aqk; A[q][k]=s*apk+c*aqk;}
+    for(k=0;k<3;k++){var vkp=V[k][p],vkq=V[k][q]; V[k][p]=c*vkp-s*vkq; V[k][q]=s*vkp+c*vkq;}
+  }
+  return [[V[0][0],V[1][0],V[2][0]],[V[0][1],V[1][1],V[2][1]],[V[0][2],V[1][2],V[2][2]]];
+}
+// Outside size of an item: the smaller of a box lined up with the model and one lined up with the item itself.
+function itemDims(meshes){
+  var pts=[], v=new THREE.Vector3(), total=0;
+  meshes.forEach(function(m){total+=m.geometry.getAttribute('position').count;});
+  var step=Math.max(1,Math.floor(total/150000));
+  meshes.forEach(function(m){var pa=m.geometry.getAttribute('position'); for(var i=0;i<pa.count;i+=step){v.fromBufferAttribute(pa,i).applyMatrix4(m.matrixWorld); var w=dispVec(v); pts.push(w.x*1000,w.y*1000,w.z*1000);}});
+  function boxIn(axes){var mn=[Infinity,Infinity,Infinity],mx=[-Infinity,-Infinity,-Infinity]; for(var i=0;i<pts.length;i+=3)for(var k=0;k<3;k++){var d=pts[i]*axes[k][0]+pts[i+1]*axes[k][1]+pts[i+2]*axes[k][2]; if(d<mn[k])mn[k]=d; if(d>mx[k])mx[k]=d;} return [mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]];}
+  var n=pts.length/3, c=[0,0,0], C=[0,0,0,0,0,0], i;
+  for(i=0;i<pts.length;i+=3){c[0]+=pts[i]; c[1]+=pts[i+1]; c[2]+=pts[i+2];} c=c.map(function(x){return x/n;});
+  for(i=0;i<pts.length;i+=3){var x=pts[i]-c[0],y=pts[i+1]-c[1],z=pts[i+2]-c[2]; C[0]+=x*x; C[1]+=y*y; C[2]+=z*z; C[3]+=x*y; C[4]+=x*z; C[5]+=y*z;}
+  var a=boxIn([[1,0,0],[0,1,0],[0,0,1]]), b=boxIn(eigSym(C)), best=(a[0]*a[1]*a[2]<=b[0]*b[1]*b[2]*1.0001)?a:b;
+  return best.sort(function(p,q){return q-p;}).map(function(x){return Math.round(x);});
+}
+function itemVolume(meshes){var V=0; meshes.forEach(function(m){V+=geoProps(m.userData.g).v*Math.abs(m.matrixWorld.determinant());}); return V;}
+function reportRows(){
+  var r=paint.res; if(!r)return [];
+  var groups=new Map();
+  r.items.forEach(function(it){
+    var dims=itemDims(it.meshes), name=baseName(it.name), key=name+'|'+dims.map(function(d){return Math.round(d/2);}).join('x');
+    var g=groups.get(key); if(!g){g={name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes),first:it}; groups.set(key,g);}
+    g.qty++; g.sum+=it.counted/1e6; g.each=g.sum/g.qty;   // identical items can differ slightly where they touch others: use the average
+  });
+  return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; return g;});
+}
+var reportState=null;
+function openReport(){
+  if(!paint.res){toast('Work out the paint area first'); return;}
+  var rows=reportRows(); reportState={rows:rows};
+  ['Company','Contact','Job','Coating','Notes'].forEach(function(k){var el=$('rp'+k); if(el&&!el.value)el.value=pref('rep.'+k.toLowerCase())||'';});
+  var opts='<option value="">Choose…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
+  $('rpAll').innerHTML='<option value="">Set all…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
+  var tb=$('rpRows'); tb.innerHTML='';
+  rows.forEach(function(g,i){
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td>'+(i+1)+'</td><td></td><td class="n">'+g.qty+'</td><td class="n">'+g.dims.join(' × ')+'</td><td class="n">'+num(g.each,3)+'</td><td><select class="btn">'+opts+'</select></td>';
+    tr.children[1].textContent=g.name;
+    var s=tr.querySelector('select'); s.value=g.mat; s.onchange=function(){g.mat=this.value; setPref('mat.'+g.name,this.value);};
+    tb.appendChild(tr);
+  });
+  $('rpAll').onchange=function(){var v=this.value; if(!v)return; rows.forEach(function(g){g.mat=v; setPref('mat.'+g.name,v);}); tb.querySelectorAll('select').forEach(function(s){s.value=v;}); this.value='';};
+  $('rpSummary').textContent=rows.length+' different item'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' pieces, '+num(paint.res.total/1e6,3)+' m² to coat.';
+  $('reportDlg').hidden=false;
+}
+function reportInfo(){
+  var o={};
+  ['Company','Contact','Job','Coating','Notes'].forEach(function(k){o[k.toLowerCase()]=$('rp'+k).value.trim(); setPref('rep.'+k.toLowerCase(),o[k.toLowerCase()]);});
+  o.pictures=$('rpPics').checked; o.file=(state.fileKey||'').split('|')[0]; o.model=state.root?state.root.name:''; o.date=new Date();
+  return o;
+}
+function rowWeight(g){var m=matInfo(g.mat); return m?g.vol*m[2]:null;}
+function reportCSV(){
+  var info=reportInfo(), rows=reportState.rows;
+  var head=['Item','Part','Quantity','Material','Length mm','Width mm','Height mm','Coated area each m2','Coated area total m2','Weight each kg'];
+  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),(g.each*g.qty).toFixed(4),w!=null?w.toFixed(2):''];});
+  var csv=[head].concat(data).map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
+  download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv');
+}
+function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('couldn’t load '+src));}; document.head.appendChild(s);});}
+// A picture of one item on its own, coloured as counted, from the isometric direction.
+function itemPicture(it,w,h){
+  var keep=new Set(it.meshes), saved=[];
+  modelRoot.children.forEach(function(o){saved.push([o,o.visible]);});
+  state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.edges)m.userData.edges.visible=keep.has(m)&&displayMode!=='shaded'; if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
+  var oldSel=state.sel.slice(); state.sel.forEach(function(n){meshesUnder(n).forEach(function(m){m.userData.sel=false;});}); state.paintView=true; state.meshes.forEach(styleMesh);
+  state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
+  var box=new THREE.Box3(); it.meshes.forEach(function(m){box.expandByObject(m);});
+  var c=box.getCenter(new THREE.Vector3()), r=box.getSize(new THREE.Vector3()).length()/2||1, dir=new THREE.Vector3(1,0.75,1.15).normalize();
+  var cam=new THREE.OrthographicCamera(-1,1,1,-1,-r*20,r*20); cam.position.copy(c).addScaledVector(dir,r*4); cam.up.set(0,1,0); cam.lookAt(c); cam.updateMatrixWorld();
+  var inv=cam.matrixWorldInverse, x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity, cv=new THREE.Vector3();
+  for(var ci=0;ci<8;ci++){cv.set(ci&1?box.max.x:box.min.x,ci&2?box.max.y:box.min.y,ci&4?box.max.z:box.min.z).applyMatrix4(inv); x0=Math.min(x0,cv.x); x1=Math.max(x1,cv.x); y0=Math.min(y0,cv.y); y1=Math.max(y1,cv.y);}
+  var cxp=(x0+x1)/2, cyp=(y0+y1)/2, hw=(x1-x0)/2*1.08, hh=(y1-y0)/2*1.08; if(hw/hh>w/h)hh=hw*h/w; else hw=hh*w/h;
+  cam.left=cxp-hw; cam.right=cxp+hw; cam.top=cyp+hh; cam.bottom=cyp-hh; cam.updateProjectionMatrix();
+  var li=new THREE.DirectionalLight(0xffffff,0.62); li.position.set(-0.6,1,0.8); cam.add(li); scene.add(cam);
+  var capsV=paint.caps?paint.caps.visible:false; if(paint.caps)paint.caps.visible=false;
+  var rt=new THREE.WebGLRenderTarget(w,h); renderer.setRenderTarget(rt); renderer.setClearColor(0xffffff,1); renderer.clear(); renderer.render(scene,cam);
+  var px=new Uint8Array(w*h*4); renderer.readRenderTargetPixels(rt,0,0,w,h,px); renderer.setRenderTarget(null); renderer.setClearColor(0x000000,0); rt.dispose();
+  scene.remove(cam); if(paint.caps)paint.caps.visible=capsV;
+  saved.forEach(function(s){s[0].visible=s[1];});
+  applyVisibility(); setSelection(oldSel,{noScroll:true}); applyPaintView();
+  var cv=document.createElement('canvas'); cv.width=w; cv.height=h; var g=cv.getContext('2d'), im=g.createImageData(w,h);
+  for(var y=0;y<h;y++)im.data.set(px.subarray((h-1-y)*w*4,(h-y)*w*4),y*w*4);
+  g.putImageData(im,0,0);
+  return cv.toDataURL('image/jpeg',0.86);
+}
+async function reportPDF(){
+  var info=reportInfo(), rows=reportState.rows, btn=$('rpPdf'); btn.disabled=true; btn.textContent='Making PDF…';
+  try{
+    if(!window.jspdf)await loadScript('jspdf.umd.min.js');
+    var doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, y=M, ink=[28,37,44], mute=[93,107,118], line=[211,218,224], green=[46,168,102];
+    function txt(s,x,yy,o){doc.text(String(s),x,yy,o||{});}
+    function font(sz,st,col){doc.setFont('helvetica',st||'normal'); doc.setFontSize(sz); doc.setTextColor.apply(doc,col||ink);}
+    // heading
+    font(18,'bold'); txt('Powder coating schedule',M,y+6);
+    font(9,'normal',mute); txt(info.date.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'}),W-M,y+2,{align:'right'}); if(info.job)txt('Ref: '+info.job,W-M,y+7,{align:'right'});
+    y+=13; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=6;
+    var left=[['From',info.company],['Contact',info.contact]].filter(function(r){return r[1];}), right=[['Model',info.model],['File',info.file],['Coating',info.coating||'To be confirmed']];
+    var y0=y;
+    font(9,'bold',mute); left.forEach(function(r,i){txt(r[0],M,y0+i*5.5);}); font(9,'normal'); left.forEach(function(r,i){txt(doc.splitTextToSize(r[1],70)[0],M+18,y0+i*5.5);});
+    font(9,'bold',mute); right.forEach(function(r,i){txt(r[0],110,y0+i*5.5);}); font(9,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',68)[0],128,y0+i*5.5);});
+    y=y0+Math.max(left.length,right.length)*5.5+3;
+    // summary
+    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+g.each*g.qty;},0), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
+    doc.setFillColor(240,246,242); doc.roundedRect(M,y,W-2*M,22,2,2,'F');
+    font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt('ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
+    font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'≥ '+num(tw,1)+' kg':'n/a'),M+140,y+16);
+    y+=28;
+    // table
+    var cols=[['#',8,'l'],['Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
+    cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
+    function head(){font(8,'bold',mute); cols.forEach(function(c,i){txt(c[0],c[2]==='r'?tx[i+1]-1:tx[i]+1,y,c[2]==='r'?{align:'right'}:{});}); y+=2; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=4.5;}
+    head();
+    rows.forEach(function(g,i){
+      var nameL=doc.splitTextToSize(g.name,cols[1][1]-2), rh=Math.max(1,nameL.length)*4.2+1.6;
+      if(y+rh>H-22){doc.addPage(); y=M+4; head();}
+      var m=matInfo(g.mat), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),num(g.each,3),num(g.each*g.qty,3)];
+      font(8.5,'normal'); cells.forEach(function(v,k){var c=cols[k]; if(k===3&&!m)doc.setTextColor.apply(doc,mute); txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y,c[2]==='r'?{align:'right'}:{}); doc.setTextColor.apply(doc,ink);});
+      y+=rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
+    });
+    font(8.5,'bold'); txt('Total',tx[1]+1,y); txt(String(pieces),tx[3]-1,y,{align:'right'}); txt(num(area,3),tx[7]-1,y,{align:'right'}); y+=8;
+    // notes and method
+    var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are the outside dimensions of each item.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
+    var blocks=[]; if(info.notes)blocks.push(['Notes',info.notes]); blocks.push(['How the area was worked out',method]);
+    blocks.forEach(function(b){var L=doc.splitTextToSize(b[1],W-2*M); if(y+6+L.length*4.2>H-18){doc.addPage(); y=M+4;} font(9,'bold'); txt(b[0],M,y); y+=4.8; font(8.5,'normal',mute); doc.text(L,M,y); y+=L.length*4.2+4;});
+    // pictures
+    if(info.pictures&&rows.length){
+      doc.addPage(); y=M+4; font(12,'bold'); txt('Items (coated surfaces in green)',M,y); y+=6;
+      var pw=(W-2*M-6)/2, ph=pw*0.72, col=0;
+      for(var i=0;i<rows.length;i++){
+        if(y+ph+8>H-14){doc.addPage(); y=M+4; col=0;}
+        var x=M+col*(pw+6);
+        btn.textContent='Pictures '+(i+1)+' of '+rows.length+'…'; await new Promise(function(r){setTimeout(r,0);});
+        doc.addImage(itemPicture(rows[i].first,720,518),'JPEG',x,y,pw,ph); doc.setDrawColor.apply(doc,line); doc.rect(x,y,pw,ph);
+        font(8.5,'bold'); txt('#'+(i+1)+'  '+doc.splitTextToSize(rows[i].name,pw-30)[0],x,y+ph+4.5); font(8.5,'normal',mute); txt(num(rows[i].each,3)+' m² each',x+pw,y+ph+4.5,{align:'right'});
+        if(col===1){y+=ph+10; col=0;} else col=1;
+      }
+    }
+    var np=doc.getNumberOfPages();
+    for(var p=1;p<=np;p++){doc.setPage(p); font(7.5,'normal',mute); txt((info.job?info.job+', ':'')+(info.model||''),M,H-8); txt('Page '+p+' of '+np,W-M,H-8,{align:'right'});}
+    doc.save((info.job||info.model||'Coating')+' coating schedule.pdf');
+    toast('Coating report saved');
+  }catch(e){console.error(e); toast('The PDF couldn’t be made: '+e.message);}
+  finally{btn.disabled=false; btn.textContent='Create PDF';}
+}
+$('rpPdf').onclick=reportPDF; $('rpCsv').onclick=reportCSV; $('rpCancel').onclick=function(){$('reportDlg').hidden=true;};
+
+// ---------- menus in the toolbar ----------
+function closePops(){document.querySelectorAll('.pop').forEach(function(p){p.hidden=true;}); document.querySelectorAll('.mbtn').forEach(function(b){b.setAttribute('aria-expanded','false');});}
+function setupPop(btnId,popId){
+  var b=$(btnId), p=$(popId);
+  b.addEventListener('click',function(){var open=p.hidden; closePops(); closeMenu(); if(open){p.hidden=false; b.setAttribute('aria-expanded','true'); var f=p.querySelector('button:not([disabled]),select:not([disabled])'); if(f)f.focus();}});
+  p.querySelectorAll('.pop-item').forEach(function(it){it.addEventListener('click',function(){closePops();});});
+}
+setupPop('mFile','popFile'); setupPop('mView','popView'); setupPop('mSettings','popSettings');
+document.addEventListener('pointerdown',function(e){if(!e.target.closest('.mwrap'))closePops();},true);
+$('btnFit2').onclick=function(){if(state.is2d)d2Fit(); else fit();};
+$('btnMore').onclick=function(){
+  var b=this, items=[{label:state.measuring?'Stop measuring':'Measure',hint:'M',action:function(){$('btnMeasure').click();}}];
+  if(!state.is2d){items.push({label:section.on?'Close section':'Section',action:function(){$('btnSection').click();}}); items.push({label:paint.on?'Close paint area':'Paint area',action:function(){$('btnPaint').click();}});}
+  items.push({label:state.is2d?'Properties':'Mass',action:function(){$('btnMass').click();}});
+  items.push({sep:true}); items.push({label:'Export…',action:function(){exportMenu(b);}});
+  menuBelow(b,items);
+};
+
+window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,itemPicture:itemPicture,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
