@@ -230,11 +230,28 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .rp-table select{font-size:12px;padding:2px 4px;max-width:150px}
 .rp-area{width:78px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);text-align:right;font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums}
 .rp-area.manual{border-color:var(--accent);font-weight:600;color:var(--accent)}
-.rp-hist{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:0}
-.rp-hist:empty{display:none}
 .rp-hl{font-size:11px;color:var(--muted)}
 .rp-chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 9px;font-size:11.5px;cursor:pointer;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
 .rp-chip:hover{border-color:var(--muted)}
+.rp-field{position:relative;display:flex;align-items:stretch}
+.rp-field input,.rp-field textarea{flex:1;min-width:0;padding-right:32px!important}
+.rp-dd{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:26px;height:26px;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center}
+.rp-ta .rp-dd{top:5px;transform:none}
+.rp-dd:hover,.rp-dd:focus-visible{background:var(--panel);color:var(--ink)}
+.rp-tablebar{gap:10px;flex-wrap:wrap}
+.rp-tablebar label{display:flex!important;align-items:center;gap:6px;margin:0!important;font-size:12.5px}
+.rp-bar-r{display:flex;align-items:center;gap:10px}
+.rp-pct{display:inline-flex;align-items:center;gap:3px;color:var(--muted)}
+.rp-adj{width:58px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);text-align:right;font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums}
+.rp-adj.adjusted{border-color:var(--accent);color:var(--accent);font-weight:600}
+.rp-used.adjusted{color:var(--accent);font-weight:600}
+.reportdlg label.chk{justify-content:flex-start!important;gap:8px}
+.menu{z-index:70!important}
+.help{overflow-y:scroll;scrollbar-gutter:stable}
+.help::-webkit-scrollbar,.rp-table::-webkit-scrollbar,.reportdlg::-webkit-scrollbar,.tree::-webkit-scrollbar,.props::-webkit-scrollbar,.menu::-webkit-scrollbar{width:11px;height:11px}
+.help::-webkit-scrollbar-thumb,.rp-table::-webkit-scrollbar-thumb,.reportdlg::-webkit-scrollbar-thumb,.tree::-webkit-scrollbar-thumb,.props::-webkit-scrollbar-thumb,.menu::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--muted) 55%,transparent);border-radius:8px;border:2px solid transparent;background-clip:padding-box;min-height:40px}
+.help::-webkit-scrollbar-thumb:hover,.rp-table::-webkit-scrollbar-thumb:hover,.reportdlg::-webkit-scrollbar-thumb:hover,.tree::-webkit-scrollbar-thumb:hover,.props::-webkit-scrollbar-thumb:hover{background:var(--muted);background-clip:padding-box}
+.help::-webkit-scrollbar-track,.rp-table::-webkit-scrollbar-track,.reportdlg::-webkit-scrollbar-track,.tree::-webkit-scrollbar-track,.props::-webkit-scrollbar-track,.menu::-webkit-scrollbar-track{background:color-mix(in srgb,var(--line) 45%,transparent);border-radius:8px}
 @media (max-width:760px){
   .tool{display:none}
   .rp-grid{grid-template-columns:1fr}
@@ -252,7 +269,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 13)</small></div>
+    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 14)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <div class="mwrap"><button class="btn primary mbtn" id="mFile" aria-haspopup="true" aria-expanded="false">File <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -265,7 +282,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       </div>
       <div class="mwrap"><button class="btn mbtn" id="mView" aria-haspopup="true" aria-expanded="false" disabled>View <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <div class="pop" id="popView" hidden>
-          <button class="pop-item" id="btnFit" disabled>Zoom to fit<span class="kbd">F or double-click wheel</span></button>
+          <button class="pop-item" id="btnFit" disabled>Zoom to fit<span class="kbd">Double-click wheel</span></button>
           <label class="pop-row" id="lblView">Standard view <select class="btn" id="selView" disabled>
             <option value="iso">Isometric</option><option value="front">Front</option><option value="back">Back</option>
             <option value="top">Top</option><option value="bottom">Bottom</option><option value="right">Right</option><option value="left">Left</option></select></label>
@@ -323,7 +340,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
       <div class="panel" id="spanel" aria-live="polite"></div>
       <div class="props" id="ppanel" aria-live="polite"></div>
       <div class="props paintp" id="paintpanel" aria-live="polite"></div>
-      <button class="btn icon fit2" id="btnFit2" title="Zoom to fit (F)" aria-label="Zoom to fit" style="display:none"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <button class="btn icon fit2" id="btnFit2" title="Zoom to fit (double-click the mouse wheel)" aria-label="Zoom to fit" style="display:none"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       <div class="secpanel" id="secpanel" hidden>
         <select class="btn" id="secAxis" aria-label="Section plane"><option value="front">Front plane</option><option value="top">Top plane</option><option value="right">Right plane</option><option value="face" id="secFace">Selected flat face</option></select>
         <input type="range" id="secSlider" min="0" max="1000" value="500" aria-label="Section position">
@@ -337,7 +354,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         <h3>Menus</h3>
         <dl>
           <dt>File</dt><dd>Open file, recent files and Close file.</dd>
-          <dt>View</dt><dd>Zoom to fit, standard views, projection, display style, saved views, and for some files the File units and Up axis.</dd>
+          <dt>View</dt><dd>Zoom to fit (double-click the mouse wheel), standard views, projection, display style, saved views, and for some files the File units and Up axis.</dd>
           <dt>Tools</dt><dd>Measure, Section, Mass and Paint area stay on the toolbar. Export holds snapshots, reports, parts lists, STL, DXF and printing.</dd>
           <dt>Settings</dt><dd>The gear icon: measurement units, rotation style (Free or Turntable) and reverse scroll zoom.</dd>
           <dt>Narrow windows</dt><dd>The tools fold into a More menu.</dd>
@@ -349,7 +366,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Rotate</dt><dd>Middle-drag, or Alt + left-drag on a touchpad. Start the drag on the model and it turns about that point. With Rotation set to Free (in Settings, the gear icon) you can tumble the model all the way round; Turntable keeps it upright. The view cube or a standard view sets it upright again.</dd>
           <dt>Pan</dt><dd>Ctrl + drag, or right-drag.</dd>
           <dt>Zoom</dt><dd>Scroll forward to zoom in, at the pointer. Shift + middle-drag also zooms.</dd>
-          <dt>Zoom to fit</dt><dd>Double-click the mouse wheel, press F over empty space, use the Fit icon under the view cube, or View, Zoom to fit.</dd>
+          <dt>Zoom to fit</dt><dd>Double-click the mouse wheel, use the Fit icon under the view cube, or View, Zoom to fit. (F is Normal to, below.)</dd>
         </dl>
         <h3>Hiding parts</h3>
         <dl>
@@ -381,7 +398,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Paint area</dt><dd>Works out the outside surface area, the area a coater would paint. Select the weldments or parts to include first (otherwise everything visible is used), then press Calculate. Counted surfaces turn green and everything else grey.</dd>
           <dt>What isn’t counted</dt><dd>Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than the gap setting. Hollow tubes with openings up to the size you set (110 × 110 mm to start with) are capped (shown in orange) unless shorter than the minimum length (150 mm), so their insides aren’t counted.</dd>
           <dt>Accuracy</dt><dd>Fast, Normal or Fine sets the grid used to decide what’s inside and outside. Areas always come from the model’s real surfaces. Big selections use a coarser grid automatically, and the panel says how big a gap that closes.</dd>
-          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater with each item’s quantity, material, outside size, area and estimated weight, an isometric picture of the whole assembly with the surfaces to coat in green, and how the area was worked out. Choose materials in the report window; they’re remembered by part name. Any area can be typed over by hand; the report marks those with *. Company, contact, coating and notes remember your last three entries: click one under the box to use it again. A CSV of the same table is there too.</dd>
+          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater. Choose how it lists things under List: each sub-assembly (the default, one line per sub-assembly with its overall size), the whole selection as one line, or each part. Each line shows quantity, material, outside size, area and estimated weight, with an isometric picture of the whole assembly. Choose materials in the report window; they’re remembered by name. Next to each worked-out area, Adjust raises or lowers it by up to 50% (Adjust all does every line); the report marks adjusted lines with * and says by how much. Company, contact, coating and notes each have a drop-down arrow listing your last three entries. A CSV of the same table is there too.</dd>
         </dl>
         <h3>Export</h3>
         <dl>
@@ -430,14 +447,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
   <h2>Coating report</h2>
   <p class="hint" id="rpSummary"></p>
   <div class="rp-grid">
-    <label>Your company <input id="rpCompany" type="text" placeholder="Company name"><span class="rp-hist" id="rhCompany"></span></label>
-    <label>Contact <input id="rpContact" type="text" placeholder="Name, phone, email"><span class="rp-hist" id="rhContact"></span></label>
-    <label>Job or reference <input id="rpJob" type="text" placeholder="Order or job number"></label>
-    <label>Coating colour and finish <input id="rpCoating" type="text" placeholder="For example satin black powder coat"><span class="rp-hist" id="rhCoating"></span></label>
+    <label>Your company <span class="rp-field"><input id="rpCompany" type="text" placeholder="Company name"><button type="button" class="rp-dd" data-for="rpCompany" data-k="company" aria-label="Last used companies" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
+    <label>Contact <span class="rp-field"><input id="rpContact" type="text" placeholder="Name, phone, email"><button type="button" class="rp-dd" data-for="rpContact" data-k="contact" aria-label="Last used contacts" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
+    <label>Job or reference <span class="rp-field"><input id="rpJob" type="text" placeholder="Order or job number"></span></label>
+    <label>Coating colour and finish <span class="rp-field"><input id="rpCoating" type="text" placeholder="For example satin black powder coat"><button type="button" class="rp-dd" data-for="rpCoating" data-k="coating" aria-label="Last used coatings" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
   </div>
-  <label class="rp-notes">Notes for the coater <textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea><span class="rp-hist" id="rhNotes"></span></label>
-  <div class="rp-tablebar"><span>Materials (remembered by part name)</span><select class="btn" id="rpAll" aria-label="Set the material for every item"></select></div>
-  <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n" title="Worked out by Paint area. Type a figure to override it.">m² each (editable)</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
+  <label class="rp-notes">Notes for the coater <span class="rp-field rp-ta"><textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea><button type="button" class="rp-dd" data-for="rpNotes" data-k="notes" aria-label="Last used notes" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
+  <div class="rp-tablebar"><label>List <select class="btn" id="rpMode"><option value="sub">Each sub-assembly</option><option value="whole">The whole selection as one line</option><option value="part">Each part</option></select></label><span class="rp-bar-r"><label>Adjust all <span class="rp-pct"><input type="number" class="rp-adj" id="rpAdjAll" min="-50" max="50" step="5" placeholder="0"><span>%</span></span></label><select class="btn" id="rpAll" aria-label="Set the material for every line"></select></span></div>
+  <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n">m² worked out</th><th class="n" title="Raise or lower the area by up to 50%">Adjust</th><th class="n">m² used</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
   <label class="chk"><input type="checkbox" id="rpIso" checked> Include an isometric picture of the whole assembly</label>
   <div class="acts"><button class="btn" id="rpCancel">Cancel</button><button class="btn" id="rpCsv">Download CSV</button><button class="btn primary" id="rpPdf">Create PDF</button></div>
 </div>
@@ -454,14 +471,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 </div>
 <div id="printArea"></div>
 <style id="pageStyle"></style>
-<script src="three.min.js?v=13"></script>
-<script src="OrbitControls.js?v=13"></script>
-<script src="LineSegmentsGeometry.js?v=13"></script>
-<script src="LineMaterial.js?v=13"></script>
-<script src="LineSegments2.js?v=13"></script>
-<script src="fflate.js?v=13"></script>
-<script src="easm-core.js?v=13"></script>
-<script src="formats.js?v=13"></script>
-<script src="app.js?v=13"></script>
+<script src="three.min.js?v=14"></script>
+<script src="OrbitControls.js?v=14"></script>
+<script src="LineSegmentsGeometry.js?v=14"></script>
+<script src="LineMaterial.js?v=14"></script>
+<script src="LineSegments2.js?v=14"></script>
+<script src="fflate.js?v=14"></script>
+<script src="easm-core.js?v=14"></script>
+<script src="formats.js?v=14"></script>
+<script src="app.js?v=14"></script>
 </body>
 </html>

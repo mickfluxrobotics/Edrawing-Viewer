@@ -381,7 +381,7 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>viewer version 13';
+  st.innerHTML=html+'<br>viewer version 14';
   $('modelOpts').innerHTML=extra?'<div class="pop-sep"></div>'+extra.replace(/<label>/g,'<label class="pop-row">').replace(/<select /g,'<select class="btn" '):'';
   var fu=$('selFileUnit');
   if(fu)fu.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
@@ -1576,7 +1576,7 @@ function contextMenu(x,y,fromTree){
   items.push({label:'Show all',action:function(){$('btnShowAll').click();}});
   items.push({label:'Undo',hint:'Ctrl+Z',disabled:!undoStack.length,action:undo});
   items.push({label:'Redo',hint:'Ctrl+Y',disabled:!redoStack.length,action:redo});
-  if(!fromTree)items.push({label:'Zoom to fit',hint:'F',action:function(){if(state.is2d)d2Fit(); else fit();}});
+  if(!fromTree)items.push({label:'Zoom to fit',hint:'Double-click wheel',action:function(){if(state.is2d)d2Fit(); else fit();}});
   showMenu(x,y,items);
 }
 
@@ -2288,10 +2288,10 @@ function runPaint(){
     if(d.progress!=null){var pg=$('pProg'); if(pg)pg.textContent=d.msg+'… '+Math.round(d.progress*100)+'%'; return;}
     paint.worker.terminate(); paint.worker=null; paint.running=false;
     if(d.error){toast('Paint area couldn’t be worked out: '+d.error); renderPaintPanel(); return;}
-    var res=d.result, all=0;
+    var res=d.result, all=0; paint.meshArea=new Map();
     res.bodies.forEach(function(b,k){
       var mp=map[k], m=mp.mesh, f=b.flags, ix=m.geometry.getIndex().array, keep=[];
-      mp.item.counted+=b.counted; mp.item.area+=b.area; all+=b.area;
+      mp.item.counted+=b.counted; mp.item.area+=b.area; all+=b.area; paint.meshArea.set(m,b.counted);
       for(var t=0;t<f.length;t++)if(f[t])keep.push(ix[3*t],ix[3*t+1],ix[3*t+2]);
       m.userData.paintIn=true;
       if(keep.length){
@@ -2354,63 +2354,125 @@ function itemDims(meshes){
   return best.sort(function(p,q){return q-p;}).map(function(x){return Math.round(x);});
 }
 function itemVolume(meshes){var V=0; meshes.forEach(function(m){V+=geoProps(m.userData.g).v*Math.abs(m.matrixWorld.determinant());}); return V;}
-function reportRows(){
+// The report can list each sub-assembly (the default), the whole selection as one line, or each part.
+function topAncestor(n){var p=n; while(p.parent&&p.parent!==state.root)p=p.parent; return p;}
+function lcaOf(nodes){
+  if(!nodes.length)return state.root;
+  var path=function(n){var a=[]; while(n){a.unshift(n); n=n.parent;} return a;};
+  var base=path(nodes[0]), k=base.length;
+  nodes.slice(1).forEach(function(n){var p=path(n), i=0; while(i<k&&i<p.length&&p[i]===base[i])i++; k=i;});
+  return base[Math.max(0,k-1)]||state.root;
+}
+var REP_MODES={sub:'Each sub-assembly',whole:'The whole selection as one line',part:'Each part'};
+function reportUnits(mode){
+  var items=paint.res.items;
+  if(mode==='part'){   // break each painted item down into its parts, using each body's own area
+    var out=[];
+    items.forEach(function(it){
+      var parts=partsUnder(it.node,new Set(it.meshes)); if(!parts.length)parts=[{name:it.name,meshes:it.meshes}];
+      parts.forEach(function(p){var c=0; p.meshes.forEach(function(m){c+=(paint.meshArea&&paint.meshArea.get(m))||0;}); out.push({name:p.name,meshes:p.meshes,counted:c});});
+    });
+    return out;
+  }
+  if(mode==='whole'){
+    var l=lcaOf(items.map(function(it){return it.node;})), ms=[], c=0;
+    items.forEach(function(it){ms=ms.concat(it.meshes); c+=it.counted;});
+    return [{name:l===state.root?state.root.name:l.name,meshes:ms,counted:c}];
+  }
+  var by=new Map();
+  items.forEach(function(it){
+    var t=it.node===state.root?state.root:topAncestor(it.node), u=by.get(t);
+    if(!u){u={nodes:[],meshes:[],counted:0}; by.set(t,u);}
+    u.nodes.push(it.node); u.meshes=u.meshes.concat(it.meshes); u.counted+=it.counted;
+  });
+  // name each line after the closest assembly holding everything painted in it (a weldment, say), not just the top level
+  return Array.from(by.values()).map(function(u){var l=lcaOf(u.nodes); u.name=l===state.root?state.root.name:l.name; return u;});
+}
+function partsUnder(node,meshSet){
+  var parts=[];
+  (function rec(n){
+    var isPart=!n.isBody&&n.meshes.length>0&&(!n.children.length||n.children.every(function(c){return c.isBody;}));
+    if(isPart){var ms=meshesUnder(n).filter(function(m){return meshSet.has(m);}); if(ms.length)parts.push({name:n.name,meshes:ms}); return;}
+    n.children.forEach(rec);
+  })(node);
+  return parts;
+}
+function reportRows(mode){
   var r=paint.res; if(!r)return [];
+  r.adj=r.adj||{};
   var groups=new Map();
-  r.items.forEach(function(it){
-    var dims=itemDims(it.meshes), name=baseName(it.name), key=name+'|'+dims.map(function(d){return Math.round(d/2);}).join('x');
-    var g=groups.get(key); if(!g){g={key:key,name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes),first:it}; groups.set(key,g);}
+  reportUnits(mode).forEach(function(it){
+    var dims=itemDims(it.meshes), name=baseName(it.name), key=mode+'|'+name+'|'+dims.map(function(d){return Math.round(d/2);}).join('x');
+    var g=groups.get(key); if(!g){g={key:key,name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes)}; groups.set(key,g);}
     g.qty++; g.sum+=it.counted/1e6; g.each=g.sum/g.qty;   // identical items can differ slightly where they touch others: use the average
   });
-  r.manual=r.manual||{};
-  return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; g.manual=r.manual[g.key]!=null?r.manual[g.key]:null; return g;});
+  return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; g.adj=r.adj[g.key]||0; return g;});
 }
 var reportState=null;
-function openReport(){
-  if(!paint.res){toast('Work out the paint area first'); return;}
-  var rows=reportRows(); reportState={rows:rows};
-  ['Company','Contact','Job','Coating','Notes'].forEach(function(k){var el=$('rp'+k); if(el&&!el.value)el.value=pref('rep.'+k.toLowerCase())||'';});
+function clampAdj(v){v=Math.round(parseFloat(v)); return isFinite(v)?Math.max(-50,Math.min(50,v)):0;}
+function fillReportTable(mode){
+  var rows=reportRows(mode); reportState={rows:rows,mode:mode};
   var opts='<option value="">Choose…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
-  $('rpAll').innerHTML='<option value="">Set all…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
   var tb=$('rpRows'); tb.innerHTML='';
   rows.forEach(function(g,i){
     var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+(i+1)+'</td><td></td><td class="n">'+g.qty+'</td><td class="n">'+g.dims.join(' × ')+'</td><td class="n"><input type="number" class="rp-area" step="0.001" min="0"></td><td><select class="btn">'+opts+'</select></td>';
+    tr.innerHTML='<td>'+(i+1)+'</td><td></td><td class="n">'+g.qty+'</td><td class="n">'+g.dims.join(' × ')+'</td><td class="n">'+num(g.each,3)+'</td><td class="n"><span class="rp-pct"><input type="number" class="rp-adj" min="-50" max="50" step="5"><span>%</span></span></td><td class="n rp-used"></td><td><select class="btn">'+opts+'</select></td>';
     tr.children[1].textContent=g.name;
-    var ai=tr.querySelector('.rp-area'); ai.value=effArea(g).toFixed(3); ai.title='Worked out: '+num(g.each,3)+' m². Type a different figure to override it.'; ai.setAttribute('aria-label','Area each in m² for '+g.name); ai.classList.toggle('manual',g.manual!=null);
-    ai.oninput=function(){var v=parseFloat(this.value); g.manual=(isFinite(v)&&v>=0&&Math.abs(v-g.each)>=0.0005)?v:null; if(g.manual!=null)paint.res.manual[g.key]=g.manual; else delete paint.res.manual[g.key]; this.classList.toggle('manual',g.manual!=null); rpSummary();};
+    var ai=tr.querySelector('.rp-adj'), used=tr.querySelector('.rp-used');
+    ai.value=g.adj; ai.setAttribute('aria-label','Adjust the area of '+g.name+' by a percentage, from -50 to 50');
+    function show(){used.textContent=num(effArea(g),3); used.classList.toggle('adjusted',!!g.adj); ai.classList.toggle('adjusted',!!g.adj);}
+    function set(v){g.adj=clampAdj(v); if(g.adj)paint.res.adj[g.key]=g.adj; else delete paint.res.adj[g.key]; show(); rpSummary();}
+    ai.oninput=function(){if(this.value!==''&&this.value!=='-')set(this.value);};
+    ai.onchange=function(){set(this.value); this.value=g.adj;};
+    g.setAdj=function(v){set(v); ai.value=g.adj;};
+    show();
     var s=tr.querySelector('select'); s.value=g.mat; s.onchange=function(){g.mat=this.value; setPref('mat.'+g.name,this.value);};
     tb.appendChild(tr);
   });
   $('rpAll').onchange=function(){var v=this.value; if(!v)return; rows.forEach(function(g){g.mat=v; setPref('mat.'+g.name,v);}); tb.querySelectorAll('select').forEach(function(s){s.value=v;}); this.value='';};
-  function rpSummary(){var man=rows.filter(function(g){return g.manual!=null;}).length; $('rpSummary').textContent=rows.length+' different item'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' pieces, '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(man?' ('+man+' area'+(man>1?'s':'')+' entered by hand)':'')+'.';}
+  $('rpAdjAll').value=''; $('rpAdjAll').onchange=function(){if(this.value==='')return; var v=clampAdj(this.value); this.value=v; rows.forEach(function(g){g.setAdj(v);});};
   rpSummary();
-  renderHist();
+}
+function rpSummary(){
+  var rows=reportState.rows, adj=rows.filter(function(g){return g.adj;}).length;
+  $('rpSummary').textContent=rows.length+' line'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' piece'+(rows.reduce(function(a,g){return a+g.qty;},0)===1?'':'s')+', '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(adj?' ('+adj+' adjusted by hand)':'')+'.';
+}
+function openReport(){
+  if(!paint.res){toast('Work out the paint area first'); return;}
+  closeMenu();
+  var mode=pref('rep.mode'); if(!REP_MODES[mode])mode='sub';
+  $('rpMode').value=mode;
+  $('rpMode').onchange=function(){setPref('rep.mode',this.value); fillReportTable(this.value);};
+  ['Company','Contact','Job','Coating','Notes'].forEach(function(k){var el=$('rp'+k); if(el&&!el.value)el.value=pref('rep.'+k.toLowerCase())||'';});
+  $('rpAll').innerHTML='<option value="">Set all…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
+  fillReportTable(mode);
   $('reportDlg').hidden=false;
 }
+// Company, contact, coating and notes remember the last three entries, offered from a drop-down on each box.
 var HIST=['company','contact','coating','notes'];
 function histGet(k){try{var a=JSON.parse(localStorage.getItem('edv.rep.hist.'+k)||'[]'); return Array.isArray(a)?a:[];}catch(e){return [];}}
-function histSave(o){HIST.forEach(function(k){var v=(o[k]||'').trim(); if(!v)return; var a=histGet(k).filter(function(x){return x!==v;}); a.unshift(v); setPref('rep.hist.'+k,JSON.stringify(a.slice(0,3)));}); renderHist();}
-function renderHist(){
-  HIST.forEach(function(k){
-    var box=$('rh'+k.charAt(0).toUpperCase()+k.slice(1)), inp=$('rp'+k.charAt(0).toUpperCase()+k.slice(1)); if(!box)return;
-    box.innerHTML=''; var a=histGet(k); if(!a.length)return;
-    var lab=document.createElement('span'); lab.className='rp-hl'; lab.textContent='Recent:'; box.appendChild(lab);
-    a.forEach(function(v){var b=document.createElement('button'); b.type='button'; b.className='rp-chip'; b.textContent=v.replace(/\s+/g,' '); b.title=v; b.onclick=function(){inp.value=v; inp.focus();}; box.appendChild(b);});
+function histSave(o){HIST.forEach(function(k){var v=(o[k]||'').trim(); if(!v)return; var a=histGet(k).filter(function(x){return x!==v;}); a.unshift(v); setPref('rep.hist.'+k,JSON.stringify(a.slice(0,3)));});}
+document.querySelectorAll('.rp-dd').forEach(function(b){
+  b.addEventListener('click',function(e){
+    e.stopPropagation();
+    if(menuEl&&menuEl.dataset.for===b.dataset.for){closeMenu(); return;}
+    var inp=$(b.dataset.for), a=histGet(b.dataset.k), r=inp.getBoundingClientRect();
+    var items=a.length?a.map(function(v){return {label:v.replace(/\s+/g,' '),action:function(){inp.value=v; inp.focus();}};}):[{label:'Nothing saved yet. Entries are kept when you create a report.',disabled:true,action:function(){}}];
+    var m=showMenu(r.left,r.bottom+4,items,'Last used'); m.dataset.for=b.dataset.for; m.style.minWidth=Math.round(r.width)+'px';
   });
-}
+});
 function reportInfo(){
   var o={};
   ['Company','Contact','Job','Coating','Notes'].forEach(function(k){o[k.toLowerCase()]=$('rp'+k).value.trim(); setPref('rep.'+k.toLowerCase(),o[k.toLowerCase()]);});
   o.iso=$('rpIso').checked; o.file=(state.fileKey||'').split('|')[0]; o.model=state.root?state.root.name:''; o.date=new Date();
   return o;
 }
-function effArea(g){return (g.manual!=null&&isFinite(g.manual))?g.manual:g.each;}
+function effArea(g){return g.each*(1+(g.adj||0)/100);}
 function rowWeight(g){var m=matInfo(g.mat); return m?g.vol*m[2]:null;}
 function reportCSV(){
   var info=reportInfo(), rows=reportState.rows;
-  var head=['Item','Part','Quantity','Material','Length mm','Width mm','Height mm','Coated area each m2','Coated area total m2','Area entered by hand','Weight each kg'];
-  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],ea.toFixed(4),(ea*g.qty).toFixed(4),g.manual!=null?'yes':'',w!=null?w.toFixed(2):''];});
+  var head=['Item','Name','Quantity','Material','Length mm','Width mm','Height mm','Worked-out area each m2','Adjustment %','Coated area each m2','Coated area total m2','Weight each kg'];
+  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),g.adj||0,ea.toFixed(4),(ea*g.qty).toFixed(4),w!=null?w.toFixed(2):''];});
   var csv=[head].concat(data).map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
   download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv'); histSave(info);
 }
@@ -2458,7 +2520,7 @@ async function reportPDF(){
     font(9,'bold',mute); right.forEach(function(r,i){txt(r[0],110,y0+i*5.5);}); font(9,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',68)[0],128,y0+i*5.5);});
     y=y0+Math.max(left.length,right.length)*5.5+3;
     // summary
-    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.manual!=null;}), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
+    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.adj;}), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
     doc.setFillColor(240,246,242); doc.roundedRect(M,y,W-2*M,22,2,2,'F');
     font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt('ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
     font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'≥ '+num(tw,1)+' kg':'n/a'),M+140,y+16);
@@ -2474,21 +2536,21 @@ async function reportPDF(){
       if(y>H-60){doc.addPage(); y=M+4;}
     }
     // table
-    var cols=[['#',8,'l'],['Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
+    var cols=[['#',8,'l'],[{sub:'Sub-assembly',whole:'Item',part:'Part'}[reportState.mode]||'Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
     cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
     function head(){font(8,'bold',mute); cols.forEach(function(c,i){txt(c[0],c[2]==='r'?tx[i+1]-1:tx[i]+1,y,c[2]==='r'?{align:'right'}:{});}); y+=2; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=4.5;}
     head();
     rows.forEach(function(g,i){
       var nameL=doc.splitTextToSize(g.name,cols[1][1]-2), rh=Math.max(1,nameL.length)*4.2+1.6;
       if(y+rh>H-22){doc.addPage(); y=M+4; head();}
-      var m=matInfo(g.mat), mk=g.manual!=null?'*':'', ea=effArea(g), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
+      var m=matInfo(g.mat), mk=g.adj?'*':'', ea=effArea(g), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
       font(8.5,'normal'); cells.forEach(function(v,k){var c=cols[k]; if(k===3&&!m)doc.setTextColor.apply(doc,mute); txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y,c[2]==='r'?{align:'right'}:{}); doc.setTextColor.apply(doc,ink);});
       y+=rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
     });
     font(8.5,'bold'); txt('Total',tx[1]+1,y); txt(String(pieces),tx[3]-1,y,{align:'right'}); txt(num(area,3),tx[7]-1,y,{align:'right'}); y+=8;
     // notes and method
     var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are the outside dimensions of each item.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
-    if(anyManual)method+=' Areas marked * were entered by hand and replace the worked-out figure.';
+    if(anyManual)method+=' Areas marked * were adjusted by hand from the worked-out figure: '+rows.map(function(g,i){return g.adj?'line '+(i+1)+' '+(g.adj>0?'+':'-')+Math.abs(g.adj)+'%':null;}).filter(Boolean).join(', ')+'.';
     var blocks=[]; if(info.notes)blocks.push(['Notes',info.notes]); blocks.push(['How the area was worked out',method]);
     blocks.forEach(function(b){var L=doc.splitTextToSize(b[1],W-2*M); if(y+6+L.length*4.2>H-18){doc.addPage(); y=M+4;} font(9,'bold'); txt(b[0],M,y); y+=4.8; font(8.5,'normal',mute); doc.text(L,M,y); y+=L.length*4.2+4;});
     var np=doc.getNumberOfPages();
@@ -2518,5 +2580,5 @@ $('btnMore').onclick=function(){
   menuBelow(b,items);
 };
 
-window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,reportRows:reportRows,fillReportTable:fillReportTable,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
