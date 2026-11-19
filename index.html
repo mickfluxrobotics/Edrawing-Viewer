@@ -228,6 +228,13 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .rp-table td{padding:5px 8px;border-top:1px solid var(--line)}
 .rp-table .n{text-align:right;white-space:nowrap}
 .rp-table select{font-size:12px;padding:2px 4px;max-width:150px}
+.rp-area{width:78px;padding:2px 5px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);text-align:right;font:inherit;font-size:12.5px;font-variant-numeric:tabular-nums}
+.rp-area.manual{border-color:var(--accent);font-weight:600;color:var(--accent)}
+.rp-hist{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:0}
+.rp-hist:empty{display:none}
+.rp-hl{font-size:11px;color:var(--muted)}
+.rp-chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 9px;font-size:11.5px;cursor:pointer;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.rp-chip:hover{border-color:var(--muted)}
 @media (max-width:760px){
   .tool{display:none}
   .rp-grid{grid-template-columns:1fr}
@@ -245,7 +252,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 12)</small></div>
+    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 13)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <div class="mwrap"><button class="btn primary mbtn" id="mFile" aria-haspopup="true" aria-expanded="false">File <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -374,7 +381,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
           <dt>Paint area</dt><dd>Works out the outside surface area, the area a coater would paint. Select the weldments or parts to include first (otherwise everything visible is used), then press Calculate. Counted surfaces turn green and everything else grey.</dd>
           <dt>What isn’t counted</dt><dd>Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than the gap setting. Hollow tubes with openings up to the size you set (110 × 110 mm to start with) are capped (shown in orange) unless shorter than the minimum length (150 mm), so their insides aren’t counted.</dd>
           <dt>Accuracy</dt><dd>Fast, Normal or Fine sets the grid used to decide what’s inside and outside. Areas always come from the model’s real surfaces. Big selections use a coarser grid automatically, and the panel says how big a gap that closes.</dd>
-          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater with each item’s quantity, material, outside size, area and estimated weight, a picture of each item with the coated surfaces in green, and how the area was worked out. Choose materials in the report window; they’re remembered by part name. A CSV of the same table is there too.</dd>
+          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater with each item’s quantity, material, outside size, area and estimated weight, an isometric picture of the whole assembly with the surfaces to coat in green, and how the area was worked out. Choose materials in the report window; they’re remembered by part name. Any area can be typed over by hand; the report marks those with *. Company, contact, coating and notes remember your last three entries: click one under the box to use it again. A CSV of the same table is there too.</dd>
         </dl>
         <h3>Export</h3>
         <dl>
@@ -423,15 +430,15 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
   <h2>Coating report</h2>
   <p class="hint" id="rpSummary"></p>
   <div class="rp-grid">
-    <label>Your company <input id="rpCompany" type="text" placeholder="Company name"></label>
-    <label>Contact <input id="rpContact" type="text" placeholder="Name, phone, email"></label>
+    <label>Your company <input id="rpCompany" type="text" placeholder="Company name"><span class="rp-hist" id="rhCompany"></span></label>
+    <label>Contact <input id="rpContact" type="text" placeholder="Name, phone, email"><span class="rp-hist" id="rhContact"></span></label>
     <label>Job or reference <input id="rpJob" type="text" placeholder="Order or job number"></label>
-    <label>Coating <input id="rpCoating" type="text" placeholder="Colour and finish"></label>
+    <label>Coating colour and finish <input id="rpCoating" type="text" placeholder="For example satin black powder coat"><span class="rp-hist" id="rhCoating"></span></label>
   </div>
-  <label class="rp-notes">Notes for the coater <textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea></label>
+  <label class="rp-notes">Notes for the coater <textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea><span class="rp-hist" id="rhNotes"></span></label>
   <div class="rp-tablebar"><span>Materials (remembered by part name)</span><select class="btn" id="rpAll" aria-label="Set the material for every item"></select></div>
-  <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n">m² each</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
-  <label class="chk"><input type="checkbox" id="rpPics" checked> Include a picture of each item</label>
+  <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n" title="Worked out by Paint area. Type a figure to override it.">m² each (editable)</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
+  <label class="chk"><input type="checkbox" id="rpIso" checked> Include an isometric picture of the whole assembly</label>
   <div class="acts"><button class="btn" id="rpCancel">Cancel</button><button class="btn" id="rpCsv">Download CSV</button><button class="btn primary" id="rpPdf">Create PDF</button></div>
 </div>
 <div class="printdlg" id="printDlg" hidden role="dialog" aria-label="Print or save as PDF">
@@ -447,14 +454,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 </div>
 <div id="printArea"></div>
 <style id="pageStyle"></style>
-<script src="three.min.js?v=12"></script>
-<script src="OrbitControls.js?v=12"></script>
-<script src="LineSegmentsGeometry.js?v=12"></script>
-<script src="LineMaterial.js?v=12"></script>
-<script src="LineSegments2.js?v=12"></script>
-<script src="fflate.js?v=12"></script>
-<script src="easm-core.js?v=12"></script>
-<script src="formats.js?v=12"></script>
-<script src="app.js?v=12"></script>
+<script src="three.min.js?v=13"></script>
+<script src="OrbitControls.js?v=13"></script>
+<script src="LineSegmentsGeometry.js?v=13"></script>
+<script src="LineMaterial.js?v=13"></script>
+<script src="LineSegments2.js?v=13"></script>
+<script src="fflate.js?v=13"></script>
+<script src="easm-core.js?v=13"></script>
+<script src="formats.js?v=13"></script>
+<script src="app.js?v=13"></script>
 </body>
 </html>

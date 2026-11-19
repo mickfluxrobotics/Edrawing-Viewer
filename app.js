@@ -381,7 +381,7 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>viewer version 12';
+  st.innerHTML=html+'<br>viewer version 13';
   $('modelOpts').innerHTML=extra?'<div class="pop-sep"></div>'+extra.replace(/<label>/g,'<label class="pop-row">').replace(/<select /g,'<select class="btn" '):'';
   var fu=$('selFileUnit');
   if(fu)fu.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
@@ -2359,10 +2359,11 @@ function reportRows(){
   var groups=new Map();
   r.items.forEach(function(it){
     var dims=itemDims(it.meshes), name=baseName(it.name), key=name+'|'+dims.map(function(d){return Math.round(d/2);}).join('x');
-    var g=groups.get(key); if(!g){g={name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes),first:it}; groups.set(key,g);}
+    var g=groups.get(key); if(!g){g={key:key,name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes),first:it}; groups.set(key,g);}
     g.qty++; g.sum+=it.counted/1e6; g.each=g.sum/g.qty;   // identical items can differ slightly where they touch others: use the average
   });
-  return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; return g;});
+  r.manual=r.manual||{};
+  return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; g.manual=r.manual[g.key]!=null?r.manual[g.key]:null; return g;});
 }
 var reportState=null;
 function openReport(){
@@ -2374,38 +2375,54 @@ function openReport(){
   var tb=$('rpRows'); tb.innerHTML='';
   rows.forEach(function(g,i){
     var tr=document.createElement('tr');
-    tr.innerHTML='<td>'+(i+1)+'</td><td></td><td class="n">'+g.qty+'</td><td class="n">'+g.dims.join(' × ')+'</td><td class="n">'+num(g.each,3)+'</td><td><select class="btn">'+opts+'</select></td>';
+    tr.innerHTML='<td>'+(i+1)+'</td><td></td><td class="n">'+g.qty+'</td><td class="n">'+g.dims.join(' × ')+'</td><td class="n"><input type="number" class="rp-area" step="0.001" min="0"></td><td><select class="btn">'+opts+'</select></td>';
     tr.children[1].textContent=g.name;
+    var ai=tr.querySelector('.rp-area'); ai.value=effArea(g).toFixed(3); ai.title='Worked out: '+num(g.each,3)+' m². Type a different figure to override it.'; ai.setAttribute('aria-label','Area each in m² for '+g.name); ai.classList.toggle('manual',g.manual!=null);
+    ai.oninput=function(){var v=parseFloat(this.value); g.manual=(isFinite(v)&&v>=0&&Math.abs(v-g.each)>=0.0005)?v:null; if(g.manual!=null)paint.res.manual[g.key]=g.manual; else delete paint.res.manual[g.key]; this.classList.toggle('manual',g.manual!=null); rpSummary();};
     var s=tr.querySelector('select'); s.value=g.mat; s.onchange=function(){g.mat=this.value; setPref('mat.'+g.name,this.value);};
     tb.appendChild(tr);
   });
   $('rpAll').onchange=function(){var v=this.value; if(!v)return; rows.forEach(function(g){g.mat=v; setPref('mat.'+g.name,v);}); tb.querySelectorAll('select').forEach(function(s){s.value=v;}); this.value='';};
-  $('rpSummary').textContent=rows.length+' different item'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' pieces, '+num(paint.res.total/1e6,3)+' m² to coat.';
+  function rpSummary(){var man=rows.filter(function(g){return g.manual!=null;}).length; $('rpSummary').textContent=rows.length+' different item'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' pieces, '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(man?' ('+man+' area'+(man>1?'s':'')+' entered by hand)':'')+'.';}
+  rpSummary();
+  renderHist();
   $('reportDlg').hidden=false;
+}
+var HIST=['company','contact','coating','notes'];
+function histGet(k){try{var a=JSON.parse(localStorage.getItem('edv.rep.hist.'+k)||'[]'); return Array.isArray(a)?a:[];}catch(e){return [];}}
+function histSave(o){HIST.forEach(function(k){var v=(o[k]||'').trim(); if(!v)return; var a=histGet(k).filter(function(x){return x!==v;}); a.unshift(v); setPref('rep.hist.'+k,JSON.stringify(a.slice(0,3)));}); renderHist();}
+function renderHist(){
+  HIST.forEach(function(k){
+    var box=$('rh'+k.charAt(0).toUpperCase()+k.slice(1)), inp=$('rp'+k.charAt(0).toUpperCase()+k.slice(1)); if(!box)return;
+    box.innerHTML=''; var a=histGet(k); if(!a.length)return;
+    var lab=document.createElement('span'); lab.className='rp-hl'; lab.textContent='Recent:'; box.appendChild(lab);
+    a.forEach(function(v){var b=document.createElement('button'); b.type='button'; b.className='rp-chip'; b.textContent=v.replace(/\s+/g,' '); b.title=v; b.onclick=function(){inp.value=v; inp.focus();}; box.appendChild(b);});
+  });
 }
 function reportInfo(){
   var o={};
   ['Company','Contact','Job','Coating','Notes'].forEach(function(k){o[k.toLowerCase()]=$('rp'+k).value.trim(); setPref('rep.'+k.toLowerCase(),o[k.toLowerCase()]);});
-  o.pictures=$('rpPics').checked; o.file=(state.fileKey||'').split('|')[0]; o.model=state.root?state.root.name:''; o.date=new Date();
+  o.iso=$('rpIso').checked; o.file=(state.fileKey||'').split('|')[0]; o.model=state.root?state.root.name:''; o.date=new Date();
   return o;
 }
+function effArea(g){return (g.manual!=null&&isFinite(g.manual))?g.manual:g.each;}
 function rowWeight(g){var m=matInfo(g.mat); return m?g.vol*m[2]:null;}
 function reportCSV(){
   var info=reportInfo(), rows=reportState.rows;
-  var head=['Item','Part','Quantity','Material','Length mm','Width mm','Height mm','Coated area each m2','Coated area total m2','Weight each kg'];
-  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),(g.each*g.qty).toFixed(4),w!=null?w.toFixed(2):''];});
+  var head=['Item','Part','Quantity','Material','Length mm','Width mm','Height mm','Coated area each m2','Coated area total m2','Area entered by hand','Weight each kg'];
+  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],ea.toFixed(4),(ea*g.qty).toFixed(4),g.manual!=null?'yes':'',w!=null?w.toFixed(2):''];});
   var csv=[head].concat(data).map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
-  download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv');
+  download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv'); histSave(info);
 }
 function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('couldn’t load '+src));}; document.head.appendChild(s);});}
 // A picture of one item on its own, coloured as counted, from the isometric direction.
-function itemPicture(it,w,h){
-  var keep=new Set(it.meshes), saved=[];
+function modelPicture(meshes,w,h){
+  var keep=new Set(meshes), saved=[];
   modelRoot.children.forEach(function(o){saved.push([o,o.visible]);});
   state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.edges)m.userData.edges.visible=keep.has(m)&&displayMode!=='shaded'; if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
   var oldSel=state.sel.slice(); state.sel.forEach(function(n){meshesUnder(n).forEach(function(m){m.userData.sel=false;});}); state.paintView=true; state.meshes.forEach(styleMesh);
   state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
-  var box=new THREE.Box3(); it.meshes.forEach(function(m){box.expandByObject(m);});
+  var box=new THREE.Box3(); meshes.forEach(function(m){box.expandByObject(m);});
   var c=box.getCenter(new THREE.Vector3()), r=box.getSize(new THREE.Vector3()).length()/2||1, dir=new THREE.Vector3(1,0.75,1.15).normalize();
   var cam=new THREE.OrthographicCamera(-1,1,1,-1,-r*20,r*20); cam.position.copy(c).addScaledVector(dir,r*4); cam.up.set(0,1,0); cam.lookAt(c); cam.updateMatrixWorld();
   var inv=cam.matrixWorldInverse, x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity, cv=new THREE.Vector3();
@@ -2441,11 +2458,21 @@ async function reportPDF(){
     font(9,'bold',mute); right.forEach(function(r,i){txt(r[0],110,y0+i*5.5);}); font(9,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',68)[0],128,y0+i*5.5);});
     y=y0+Math.max(left.length,right.length)*5.5+3;
     // summary
-    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+g.each*g.qty;},0), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
+    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.manual!=null;}), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
     doc.setFillColor(240,246,242); doc.roundedRect(M,y,W-2*M,22,2,2,'F');
     font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt('ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
     font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'≥ '+num(tw,1)+' kg':'n/a'),M+140,y+16);
     y+=28;
+    // isometric picture of the whole assembly, fitted to the frame
+    if(info.iso){
+      btn.textContent='Making the picture…'; await new Promise(function(r){setTimeout(r,0);});
+      var shown=state.meshes.filter(function(m){return m.visible;}), other=shown.some(function(m){return !m.userData.paintIn;});
+      var iw=W-2*M, ih=iw*0.56, img=modelPicture(shown,1600,Math.round(1600*0.56));
+      doc.addImage(img,'JPEG',M,y,iw,ih); doc.setDrawColor.apply(doc,line); doc.rect(M,y,iw,ih);
+      font(8,'normal',mute); txt('Isometric view of the assembly. Surfaces to coat are shown in green'+(other?', other parts are shown faint.':'.'),M,y+ih+4.5);
+      y+=ih+11;
+      if(y>H-60){doc.addPage(); y=M+4;}
+    }
     // table
     var cols=[['#',8,'l'],['Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
     cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
@@ -2454,31 +2481,19 @@ async function reportPDF(){
     rows.forEach(function(g,i){
       var nameL=doc.splitTextToSize(g.name,cols[1][1]-2), rh=Math.max(1,nameL.length)*4.2+1.6;
       if(y+rh>H-22){doc.addPage(); y=M+4; head();}
-      var m=matInfo(g.mat), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),num(g.each,3),num(g.each*g.qty,3)];
+      var m=matInfo(g.mat), mk=g.manual!=null?'*':'', ea=effArea(g), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
       font(8.5,'normal'); cells.forEach(function(v,k){var c=cols[k]; if(k===3&&!m)doc.setTextColor.apply(doc,mute); txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y,c[2]==='r'?{align:'right'}:{}); doc.setTextColor.apply(doc,ink);});
       y+=rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
     });
     font(8.5,'bold'); txt('Total',tx[1]+1,y); txt(String(pieces),tx[3]-1,y,{align:'right'}); txt(num(area,3),tx[7]-1,y,{align:'right'}); y+=8;
     // notes and method
     var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are the outside dimensions of each item.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
+    if(anyManual)method+=' Areas marked * were entered by hand and replace the worked-out figure.';
     var blocks=[]; if(info.notes)blocks.push(['Notes',info.notes]); blocks.push(['How the area was worked out',method]);
     blocks.forEach(function(b){var L=doc.splitTextToSize(b[1],W-2*M); if(y+6+L.length*4.2>H-18){doc.addPage(); y=M+4;} font(9,'bold'); txt(b[0],M,y); y+=4.8; font(8.5,'normal',mute); doc.text(L,M,y); y+=L.length*4.2+4;});
-    // pictures
-    if(info.pictures&&rows.length){
-      doc.addPage(); y=M+4; font(12,'bold'); txt('Items (coated surfaces in green)',M,y); y+=6;
-      var pw=(W-2*M-6)/2, ph=pw*0.72, col=0;
-      for(var i=0;i<rows.length;i++){
-        if(y+ph+8>H-14){doc.addPage(); y=M+4; col=0;}
-        var x=M+col*(pw+6);
-        btn.textContent='Pictures '+(i+1)+' of '+rows.length+'…'; await new Promise(function(r){setTimeout(r,0);});
-        doc.addImage(itemPicture(rows[i].first,720,518),'JPEG',x,y,pw,ph); doc.setDrawColor.apply(doc,line); doc.rect(x,y,pw,ph);
-        font(8.5,'bold'); txt('#'+(i+1)+'  '+doc.splitTextToSize(rows[i].name,pw-30)[0],x,y+ph+4.5); font(8.5,'normal',mute); txt(num(rows[i].each,3)+' m² each',x+pw,y+ph+4.5,{align:'right'});
-        if(col===1){y+=ph+10; col=0;} else col=1;
-      }
-    }
     var np=doc.getNumberOfPages();
     for(var p=1;p<=np;p++){doc.setPage(p); font(7.5,'normal',mute); txt((info.job?info.job+', ':'')+(info.model||''),M,H-8); txt('Page '+p+' of '+np,W-M,H-8,{align:'right'});}
-    doc.save((info.job||info.model||'Coating')+' coating schedule.pdf');
+    doc.save((info.job||info.model||'Coating')+' coating schedule.pdf'); histSave(info);
     toast('Coating report saved');
   }catch(e){console.error(e); toast('The PDF couldn’t be made: '+e.message);}
   finally{btn.disabled=false; btn.textContent='Create PDF';}
@@ -2503,5 +2518,5 @@ $('btnMore').onclick=function(){
   menuBelow(b,items);
 };
 
-window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,itemPicture:itemPicture,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();
