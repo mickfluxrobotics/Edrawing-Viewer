@@ -256,6 +256,10 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .pmask{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12.5px;color:var(--muted)}
 #pMark[aria-pressed="true"]{background:#E8336B;border-color:#E8336B;color:#fff}
 .hint.mk{color:#C42C5C}
+.rp-qty{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 4px;padding:8px 10px;border:1.5px solid var(--ink);border-radius:9px;background:var(--panel)}
+.rp-qty label{font-weight:600;font-size:13.5px}
+.rp-qty input{width:74px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);font:inherit;font-size:15px;font-weight:700;text-align:center}
+.rp-qty span{font-size:12px;color:var(--muted);flex:1;min-width:180px}
 @media (max-width:760px){
   .tool{display:none}
   .rp-grid{grid-template-columns:1fr}
@@ -273,7 +277,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 15)</small></div>
+    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 17)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <div class="mwrap"><button class="btn primary mbtn" id="mFile" aria-haspopup="true" aria-expanded="false">File <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -401,9 +405,9 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         <dl>
           <dt>Paint area</dt><dd>Works out the outside surface area, the area a coater would paint. Select the weldments or parts to include first (otherwise everything visible is used), then press Calculate. Counted surfaces turn green and everything else grey.</dd>
           <dt>What isn’t counted</dt><dd>Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than the gap setting. Hollow tubes with openings up to the size you set (110 × 110 mm to start with) are capped (shown in orange) unless shorter than the minimum length (150 mm), so their insides aren’t counted.</dd>
-          <dt>Uncoated surfaces</dt><dd>In the Paint area panel, press Mark uncoated faces, then click faces that must stay free of coating (bearing seats, threads, mating faces). They turn pink, come straight off the area and are remembered for this file. Click a face again to unmark it; Esc when done; Clear marks removes them all. The report adds a note naming the parts and arrows pointing to them in the picture.</dd>
+          <dt>Uncoated surfaces</dt><dd>In the Paint area panel, press Mark uncoated faces. Click a face to mark it pink (click again to unmark). Drag a box left to right to mark every face entirely inside it, which is the quick way to do threads: box a threaded hole and every thread face is marked, but not the face the hole is in. Drag right to left to mark every face the box touches. Shift + drag unmarks. Only parts you can see under the box are included. Marked faces come straight off the area and are remembered for this file; Esc when done; Clear marks removes them all.</dd>
           <dt>Accuracy</dt><dd>Fast, Normal or Fine sets the grid used to decide what’s inside and outside. Areas always come from the model’s real surfaces. Big selections use a coarser grid automatically, and the panel says how big a gap that closes.</dd>
-          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater, with the overall size of the assembly (L × W × H) at the top whatever the list style. Choose how it lists things under List: each sub-assembly (the default), the whole selection as one line, or each part. Each line shows quantity, material, outside size, area and estimated weight, under an isometric picture of the whole assembly. Sub-assembly and whole-selection reports fit on one page; each-part reports run on as needed. Faces marked uncoated appear in pink with arrows, and a note lists the parts to mask. Next to each worked-out area, Adjust raises or lowers it by up to 50% (Adjust all does every line); adjusted lines are marked *. Company, contact, coating and notes each have a drop-down of your last three entries. A CSV of the same table is there too.</dd>
+          <dt>Quote request</dt><dd>From the Paint area panel or Export: a one-page powder coating quote request to send to your coater. It shows who it’s from, the coating and material, whether masking is needed, the total area, pieces, overall size L × W × H and weight, a picture of the current view (set the view first so the surfaces to mask can be seen) with the surfaces to mask arrowed in pink, a table of items, and your notes. List chooses the lines: each sub-assembly (the default), the whole selection as one line, or each part (which can run to more pages). Adjust raises or lowers a line’s area by up to 50% before it goes on the request. Company, contact, coating and notes each have a drop-down of your last three entries. Quantity to coat (1 unless you change it) multiplies everything, for example 3 if you’re sending three of the assembly; it’s shown first in the summary at the top. A CSV of the same table is there too.</dd>
         </dl>
         <h3>Export</h3>
         <dl>
@@ -448,9 +452,10 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
   </div>
   <div class="mk-stage"><canvas id="mkCanvas"></canvas></div>
 </div>
-<div class="printdlg reportdlg" id="reportDlg" hidden role="dialog" aria-label="Coating report">
-  <h2>Coating report</h2>
+<div class="printdlg reportdlg" id="reportDlg" hidden role="dialog" aria-label="Powder coating quote request">
+  <h2>Powder coating quote request</h2>
   <p class="hint" id="rpSummary"></p>
+  <div class="rp-qty"><label for="rpQty">Quantity to coat</label><input type="number" id="rpQty" min="1" step="1" value="1"><span>of each item listed below. Pieces, area and weight on the request are multiplied by this.</span></div>
   <div class="rp-grid">
     <label>Your company <span class="rp-field"><input id="rpCompany" type="text" placeholder="Company name"><button type="button" class="rp-dd" data-for="rpCompany" data-k="company" aria-label="Last used companies" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
     <label>Contact <span class="rp-field"><input id="rpContact" type="text" placeholder="Name, phone, email"><button type="button" class="rp-dd" data-for="rpContact" data-k="contact" aria-label="Last used contacts" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
@@ -460,7 +465,8 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
   <label class="rp-notes">Notes for the coater <span class="rp-field rp-ta"><textarea id="rpNotes" rows="2" placeholder="Masking, threads to protect, hanging points…"></textarea><button type="button" class="rp-dd" data-for="rpNotes" data-k="notes" aria-label="Last used notes" title="Last used"><svg width="11" height="11" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button></span></label>
   <div class="rp-tablebar"><label>List <select class="btn" id="rpMode"><option value="sub">Each sub-assembly</option><option value="whole">The whole selection as one line</option><option value="part">Each part</option></select></label><span class="rp-bar-r"><label>Adjust all <span class="rp-pct"><input type="number" class="rp-adj" id="rpAdjAll" min="-50" max="50" step="5" placeholder="0"><span>%</span></span></label><select class="btn" id="rpAll" aria-label="Set the material for every line"></select></span></div>
   <div class="rp-table"><table><thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Size mm</th><th class="n">m² worked out</th><th class="n" title="Raise or lower the area by up to 50%">Adjust</th><th class="n">m² used</th><th>Material</th></tr></thead><tbody id="rpRows"></tbody></table></div>
-  <label class="chk"><input type="checkbox" id="rpIso" checked> Include an isometric picture of the whole assembly</label>
+  <label class="chk"><input type="checkbox" id="rpIso" checked> Include a picture of the current view</label>
+  <p class="hint">The picture is taken from the view behind this window, so turn the model to show the surfaces to mask before you open it. To change the view, press Cancel, adjust it, and open the request again; your entries are kept.</p>
   <div class="acts"><button class="btn" id="rpCancel">Cancel</button><button class="btn" id="rpCsv">Download CSV</button><button class="btn primary" id="rpPdf">Create PDF</button></div>
 </div>
 <div class="printdlg" id="printDlg" hidden role="dialog" aria-label="Print or save as PDF">
@@ -476,14 +482,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 </div>
 <div id="printArea"></div>
 <style id="pageStyle"></style>
-<script src="three.min.js?v=15"></script>
-<script src="OrbitControls.js?v=15"></script>
-<script src="LineSegmentsGeometry.js?v=15"></script>
-<script src="LineMaterial.js?v=15"></script>
-<script src="LineSegments2.js?v=15"></script>
-<script src="fflate.js?v=15"></script>
-<script src="easm-core.js?v=15"></script>
-<script src="formats.js?v=15"></script>
-<script src="app.js?v=15"></script>
+<script src="three.min.js?v=17"></script>
+<script src="OrbitControls.js?v=17"></script>
+<script src="LineSegmentsGeometry.js?v=17"></script>
+<script src="LineMaterial.js?v=17"></script>
+<script src="LineSegments2.js?v=17"></script>
+<script src="fflate.js?v=17"></script>
+<script src="easm-core.js?v=17"></script>
+<script src="formats.js?v=17"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>

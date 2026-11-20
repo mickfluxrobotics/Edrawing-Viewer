@@ -381,7 +381,7 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>viewer version 15';
+  st.innerHTML=html+'<br>viewer version 17';
   $('modelOpts').innerHTML=extra?'<div class="pop-sep"></div>'+extra.replace(/<label>/g,'<label class="pop-row">').replace(/<select /g,'<select class="btn" '):'';
   var fu=$('selFileUnit');
   if(fu)fu.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
@@ -1353,7 +1353,7 @@ renderer.domElement.addEventListener('pointerdown',function(e){
     clearHover(); down=null; e.preventDefault(); needsRender=true; return;
   }
   down={x:e.clientX,y:e.clientY,t:performance.now(),b:e.button,box:false,id:e.pointerId,
-    canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&!paint.marking&&state.meshes.length>0};
+    canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&state.meshes.length>0};
   if(down.canBox){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
 });
 renderer.domElement.addEventListener('pointermove',function(e){
@@ -1380,6 +1380,7 @@ renderer.domElement.addEventListener('pointerup',function(e){
   if(d.box){
     endBand();
     if(state.is2d){var ids=d2BoxSelect(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x); d2SetSel(e.shiftKey?Array.from(state.sel2d).concat(ids):ids); return;}
+    if(paint.marking){markBox(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x,e.shiftKey); return;}
     var picked=boxSelect(d.x,d.y,e.clientX,e.clientY,e.clientX<d.x);
     setSelection(e.shiftKey?state.sel.concat(picked):picked,{noScroll:true});
     return;
@@ -1922,7 +1923,7 @@ function exportMenu(anchor){
   if(state.is2d)items.push({label:'Print or save as PDF…',action:openPrint});
   else{
     items.push({sep:true});
-    items.push({label:'Coating report (paint area)…',disabled:!paint.res,hint:paint.res?'':'use Paint area first',action:openReport});
+    items.push({label:'Powder coating quote request…',disabled:!paint.res,hint:paint.res?'':'use Paint area first',action:openReport});
     items.push({label:'Parts list (CSV)',action:function(){exportParts(false);}});
     items.push({label:'Parts list, visible parts only (CSV)',action:function(){exportParts(true);}});
     items.push({label:'Copy parts list for a spreadsheet',action:function(){exportParts(false,true);}});
@@ -2251,11 +2252,11 @@ function renderPaintPanel(){
   h+='<div class="pform"><label>Close gaps up to <input type="number" id="pGap" min="0" max="50" step="0.5" value="'+st.gap+'"> mm</label>';
   h+='<div class="pgroup"><span>Cap tube openings up to</span><span><input type="number" id="pCapW" min="0" step="1" value="'+st.capW+'" aria-label="Largest opening width"> × <input type="number" id="pCapH" min="0" step="1" value="'+st.capH+'" aria-label="Largest opening height"> mm</span><span>unless shorter than <input type="number" id="pMinLen" min="0" step="1" value="'+st.minLen+'"> mm</span></div>';
   h+='<label>Accuracy <select class="btn" id="pAcc">'+Object.keys(PAINT_ACC).map(function(k){return '<option value="'+k+'"'+(k===st.acc?' selected':'')+'>'+PAINT_ACC[k].label+'</option>';}).join('')+'</select></label></div>';
-  h+='<div class="acts"><button class="btn primary" id="pRun"'+(paint.running?' disabled':'')+'>'+(r?'Recalculate':'Calculate')+'</button>'+(r?'<button class="btn" id="pReport">Coating report…</button><button class="btn" id="pClear">Clear</button>':'')+'</div>';
+  h+='<div class="acts"><button class="btn primary" id="pRun"'+(paint.running?' disabled':'')+'>'+(r?'Recalculate':'Calculate')+'</button>'+(r?'<button class="btn" id="pReport">Quote request…</button><button class="btn" id="pClear">Clear</button>':'')+'</div>';
   h+='<p class="hint" id="pProg">'+(paint.running?'Working…':'')+'</p>';
   var msum=maskSummary();
   h+='<div class="pmask"><button class="btn" id="pMark" aria-pressed="'+paint.marking+'">Mark uncoated faces</button>'+(msum.n?'<span>'+msum.n+' marked</span><button class="btn" id="pMaskClear">Clear marks</button>':'')+'</div>';
-  if(paint.marking)h+='<p class="hint mk">Click faces that must stay free of coating, such as bearing seats and threads. They turn pink and aren’t counted. Click again to unmark. Esc when done.</p>';
+  if(paint.marking)h+='<p class="hint mk">Click faces that must stay free of coating; they turn pink and aren’t counted. Drag a box left to right to mark every face entirely inside it (ideal for threads), or right to left for every face it touches. Click again, or Shift + drag, to unmark. Esc when done.</p>';
   if(r){
     h+='<div class="big">'+fmtArea(r.total/1e6)+'</div>';
     h+='<p class="sub">painted, out of '+fmtArea(r.all/1e6)+' of surface in '+r.items.length+' item'+(r.items.length===1?'':'s')+'.'+(r.maskArea?' '+fmtArea(r.maskArea/1e6)+' on faces marked uncoated is left out.':'')+'</p>';
@@ -2421,6 +2422,47 @@ function maskHover(pick){
   var ov=new THREE.Mesh(faceGeo(pick.mesh,pick.shell),maskHovMat); ov.matrixAutoUpdate=false; ov.matrix.copy(pick.mesh.matrix); ov.raycast=function(){}; ov.renderOrder=4;
   modelRoot.add(ov); ov.updateMatrixWorld(true); mhov.ov=ov;
 }
+// Box marking: left to right marks faces entirely inside the box (threads in a hole),
+// right to left marks every face the box touches. Shift + drag unmarks. Only parts seen under the box count.
+function markBox(x0,y0,x1,y1,crossing,unmark){
+  var rect=rectOf(), L=Math.min(x0,x1), R=Math.max(x0,x1), T=Math.min(y0,y1), B=Math.max(y0,y1);
+  var n=crossing?14:10, seen=new Set(), hitFaces=new Set();
+  for(var i=0;i<n;i++)for(var j=0;j<n;j++){
+    var h=rayHit(L+(R-L)*(i+0.5)/n,T+(B-T)*(j+0.5)/n);
+    if(!h||!h.object.userData.g)continue;
+    seen.add(h.object); if(crossing&&h.faceIndex!=null)hitFaces.add(h.object.id+':'+shellOfHit(h));
+  }
+  var picked=[], cam=camera; cam.updateMatrixWorld();
+  seen.forEach(function(m){
+    if(paint.res&&!m.userData.paintIn)return;
+    var g=m.userData.g, pa=g.geo.getAttribute('position').array, ix=g.geo.getIndex().array, nv=pa.length/3;
+    var M=new THREE.Matrix4().multiplyMatrices(cam.projectionMatrix,new THREE.Matrix4().multiplyMatrices(cam.matrixWorldInverse,m.matrixWorld)), e=M.elements;
+    var sx=new Float32Array(nv), sy=new Float32Array(nv), ok=new Uint8Array(nv), W=rect.width, H=rect.height;
+    for(var v=0;v<nv;v++){
+      var x=pa[3*v], y=pa[3*v+1], z=pa[3*v+2], w=e[3]*x+e[7]*y+e[11]*z+e[15];
+      if(w<=0)continue;
+      sx[v]=((e[0]*x+e[4]*y+e[8]*z+e[12])/w+1)/2*W+rect.left; sy[v]=(1-(e[1]*x+e[5]*y+e[9]*z+e[13])/w)/2*H+rect.top; ok[v]=1;
+    }
+    for(var s=0;s+1<g.shellStart.length;s++){
+      var a=g.shellStart[s], b=g.shellStart[s+1]; if(b<=a)continue;
+      var all=true, any=false;
+      for(var k=a;k<b;k++){
+        var q=ix[k], inside=ok[q]&&sx[q]>=L&&sx[q]<=R&&sy[q]>=T&&sy[q]<=B;
+        if(inside)any=true; else all=false;
+        if(crossing?any:!all)break;
+      }
+      if(crossing?(any||hitFaces.has(m.id+':'+s)):all)picked.push([m,s]);
+    }
+  });
+  var changed=0;
+  picked.forEach(function(p){
+    var key=maskKey(p[0],p[1]), has=paint.masks.has(key);
+    if(unmark&&has){removeMask(key); changed++;}
+    else if(!unmark&&!has){addMask(p[0],p[1]); changed++;}
+  });
+  if(changed){saveMasks(); applyMasks(); renderPaintPanel(); applyPaintView(); needsRender=true;}
+  toast(changed?(unmark?'Unmarked ':'Marked ')+changed+' face'+(changed>1?'s':''):(picked.length?'Those faces were already '+(unmark?'unmarked':'marked'):'No faces '+(crossing?'touched by':'entirely inside')+' the box'));
+}
 function markPick(x,y){var h=rayHit(x,y); if(!h||h.faceIndex==null||!h.object.userData.g)return null; return {mesh:h.object,shell:shellOfHit(h)};}
 function queueMarkHover(x,y){mhov.x=x; mhov.y=y; if(mhov.timer===null)mhov.timer=setTimeout(function(){mhov.timer=null; if(paint.marking)maskHover(markPick(mhov.x,mhov.y));},50);}
 
@@ -2532,9 +2574,11 @@ function fillReportTable(mode){
   $('rpAdjAll').value=''; $('rpAdjAll').onchange=function(){if(this.value==='')return; var v=clampAdj(this.value); this.value=v; rows.forEach(function(g){g.setAdj(v);});};
   rpSummary();
 }
+function repSets(){return (paint.res&&paint.res.sets>1)?paint.res.sets:1;}
 function rpSummary(){
-  var rows=reportState.rows, adj=rows.filter(function(g){return g.adj;}).length;
-  $('rpSummary').textContent=rows.length+' line'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' piece'+(rows.reduce(function(a,g){return a+g.qty;},0)===1?'':'s')+', '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(adj?' ('+adj+' adjusted by hand)':'')+'. Overall size '+(reportOverall||[0,0,0]).join(' × ')+' mm'+(paint.masks.size?', '+paint.masks.size+' surface'+(paint.masks.size>1?'s':'')+' to keep uncoated':'')+'.';
+  var rows=reportState.rows, adj=rows.filter(function(g){return g.adj;}).length, q=repSets();
+  var pcs=rows.reduce(function(a,g){return a+g.qty;},0)*q;
+  $('rpSummary').textContent=(q>1?'Quantity '+q+': ':'')+rows.length+' line'+(rows.length===1?'':'s')+', '+pcs+' piece'+(pcs===1?'':'s')+', '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0)*q,3)+' m² to coat'+(adj?' ('+adj+' adjusted by hand)':'')+'. Overall size '+(reportOverall||[0,0,0]).join(' × ')+' mm'+(paint.masks.size?', '+paint.masks.size+' surface'+(paint.masks.size>1?'s':'')+' to keep uncoated':'')+'.';
 }
 function openReport(){
   if(!paint.res){toast('Work out the paint area first'); return;}
@@ -2545,6 +2589,9 @@ function openReport(){
   $('rpMode').onchange=function(){setPref('rep.mode',this.value); fillReportTable(this.value);};
   ['Company','Contact','Job','Coating','Notes'].forEach(function(k){var el=$('rp'+k); if(el&&!el.value)el.value=pref('rep.'+k.toLowerCase())||'';});
   $('rpAll').innerHTML='<option value="">Set all…</option>'+MATS.map(function(m){return '<option value="'+m[0]+'">'+m[1]+'</option>';}).join('');
+  $('rpQty').value=repSets();
+  $('rpQty').oninput=function(){var v=Math.round(parseFloat(this.value)); paint.res.sets=isFinite(v)&&v>=1?Math.min(v,9999):1; rpSummary();};
+  $('rpQty').onchange=function(){this.value=repSets();};
   fillReportTable(mode);
   $('reportDlg').hidden=false;
 }
@@ -2571,20 +2618,37 @@ function effArea(g){return g.each*(1+(g.adj||0)/100);}
 function rowWeight(g){var m=matInfo(g.mat); return m?g.vol*m[2]:null;}
 function reportCSV(){
   var info=reportInfo(), rows=reportState.rows;
-  var head=['Item','Name','Quantity','Material','Length mm','Width mm','Height mm','Worked-out area each m2','Adjustment %','Coated area each m2','Coated area total m2','Weight each kg','Has surfaces to keep uncoated'];
-  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),g.adj||0,ea.toFixed(4),(ea*g.qty).toFixed(4),w!=null?w.toFixed(2):'',g.mask?'yes':''];});
+  var head=['Item','Description','Quantity','Material','Length mm','Width mm','Height mm','Area each m2','Area total m2','Weight each kg','Masking required'];
+  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty*repSets(),m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],ea.toFixed(3),(ea*g.qty*repSets()).toFixed(3),w!=null?w.toFixed(1):'',g.mask?'yes':''];});
   var csv=[head].concat(data).map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
-  download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv'); histSave(info);
+  download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||state.root.name||'Coating')+' powder coating quote request.csv'); histSave(info);
 }
 function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('couldn’t load '+src));}; document.head.appendChild(s);});}
 // A picture of one item on its own, coloured as counted, from the isometric direction.
-function modelPicture(meshes,w,h,arrowPts){
+// A camera matching what's on screen, widened (never cropped) to the picture's shape.
+function viewCamera(w,h){
+  var el=renderer.domElement, sa=(el.clientWidth||1)/(el.clientHeight||1), ta=w/h, cam=camera.clone();
+  if(camera.isOrthographicCamera){
+    var z=camera.zoom||1, l=camera.left/z, r=camera.right/z, t=camera.top/z, b=camera.bottom/z, hw=(r-l)/2, hh=(t-b)/2, cx=(r+l)/2, cy=(t+b)/2;
+    if(ta>hw/hh)hw=hh*ta; else hh=hw/ta;
+    cam.left=cx-hw; cam.right=cx+hw; cam.top=cy+hh; cam.bottom=cy-hh; cam.zoom=1;
+  }else{
+    var hf=2*Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov)/2)*sa);
+    cam.aspect=ta; if(ta<sa)cam.fov=THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(hf/2)/ta));
+  }
+  cam.updateProjectionMatrix(); cam.updateMatrixWorld(true);
+  return cam;
+}
+function modelPicture(meshes,w,h,arrowPts,useView){
   var keep=new Set(meshes), saved=[];
   modelRoot.children.forEach(function(o){saved.push([o,o.visible]);});
   state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.edges)m.userData.edges.visible=keep.has(m)&&displayMode!=='shaded'; if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
   var oldSel=state.sel.slice(); state.sel.forEach(function(n){meshesUnder(n).forEach(function(m){m.userData.sel=false;});}); state.paintView=true; state.meshes.forEach(styleMesh);
   state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m); if(m.userData.paintPart)m.userData.paintPart.visible=keep.has(m); (m.userData.maskOvs||[]).forEach(function(o){o.visible=keep.has(m);});});
   if(mhov.ov)mhov.ov.visible=false;
+  var cam;
+  if(useView){cam=viewCamera(w,h); scene.add(cam);}
+  else{
   var box=new THREE.Box3(); meshes.forEach(function(m){box.expandByObject(m);});
   var c=box.getCenter(new THREE.Vector3()), r=box.getSize(new THREE.Vector3()).length()/2||1, dir=new THREE.Vector3(1,0.75,1.15).normalize();
   var cam=new THREE.OrthographicCamera(-1,1,1,-1,-r*20,r*20); cam.position.copy(c).addScaledVector(dir,r*4); cam.up.set(0,1,0); cam.lookAt(c); cam.updateMatrixWorld();
@@ -2593,10 +2657,13 @@ function modelPicture(meshes,w,h,arrowPts){
   var cxp=(x0+x1)/2, cyp=(y0+y1)/2, hw=(x1-x0)/2*1.1, hh=(y1-y0)/2*1.1; if(hw/hh>w/h)hh=hw*h/w; else hw=hh*w/h;
   cam.left=cxp-hw; cam.right=cxp+hw; cam.top=cyp+hh; cam.bottom=cyp-hh; cam.updateProjectionMatrix();
   var li=new THREE.DirectionalLight(0xffffff,0.62); li.position.set(-0.6,1,0.8); cam.add(li); scene.add(cam);
+  }
+  // leave measuring marks, hover highlights and selection outlines out of the picture
+  var tmpHidden=[]; (state.mObjs||[]).concat(hover.objs||[],hovObj?[hovObj]:[]).forEach(function(o){if(o&&o.visible){o.visible=false; tmpHidden.push(o);}});
   var capsV=paint.caps?paint.caps.visible:false; if(paint.caps)paint.caps.visible=false;
   var rt=new THREE.WebGLRenderTarget(w,h); renderer.setRenderTarget(rt); renderer.setClearColor(0xffffff,1); renderer.clear(); renderer.render(scene,cam);
   var px=new Uint8Array(w*h*4); renderer.readRenderTargetPixels(rt,0,0,w,h,px); renderer.setRenderTarget(null); renderer.setClearColor(0x000000,0); rt.dispose();
-  scene.remove(cam); if(paint.caps)paint.caps.visible=capsV;
+  scene.remove(cam); if(paint.caps)paint.caps.visible=capsV; tmpHidden.forEach(function(o){o.visible=true;});
   saved.forEach(function(s){s[0].visible=s[1];});
   applyVisibility(); setSelection(oldSel,{noScroll:true}); applyPaintView();
   var cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h; var g=cvs.getContext('2d'), im=g.createImageData(w,h);
@@ -2604,13 +2671,17 @@ function modelPicture(meshes,w,h,arrowPts){
   g.putImageData(im,0,0);
   // arrows pointing at the surfaces to keep uncoated (nearby ones share an arrow)
   if(arrowPts&&arrowPts.length){
+    var proj=[];
+    arrowPts.forEach(function(p){var q=p.clone().project(cam), sx=(q.x+1)/2*w, sy=(1-q.y)/2*h; if(sx>=0&&sy>=0&&sx<=w&&sy<=h&&q.z<1)proj.push([sx,sy]);});
     var pts=[], R=0.05*w;
-    arrowPts.forEach(function(p){
-      var q=p.clone().project(cam), sx=(q.x+1)/2*w, sy=(1-q.y)/2*h;
-      if(sx<0||sy<0||sx>w||sy>h)return;
-      var hit=null; pts.forEach(function(c2){if(!hit&&Math.hypot(c2.x-sx,c2.y-sy)<R)hit=c2;});
-      if(hit){hit.x=(hit.x*hit.n+sx)/(hit.n+1); hit.y=(hit.y*hit.n+sy)/(hit.n+1); hit.n++;} else pts.push({x:sx,y:sy,n:1});
-    });
+    for(var pass=0;pass<12;pass++){
+      pts=[];
+      proj.forEach(function(q){
+        var hit=null; pts.forEach(function(c2){if(!hit&&Math.hypot(c2.x-q[0],c2.y-q[1])<R)hit=c2;});
+        if(hit){hit.x=(hit.x*hit.n+q[0])/(hit.n+1); hit.y=(hit.y*hit.n+q[1])/(hit.n+1); hit.n++;} else pts.push({x:q[0],y:q[1],n:1});
+      });
+      if(pts.length<=12)break; R*=1.35;
+    }
     var col='#E8336B', L=0.11*w, mx=0.03*w, my=0.05*h;
     pts.forEach(function(p){
       var dx=p.x-w/2, dy=p.y-h/2, dl=Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
@@ -2633,82 +2704,121 @@ async function reportPDF(){
   var info=reportInfo(), rows=reportState.rows, mode=reportState.mode, btn=$('rpPdf'); btn.disabled=true; btn.textContent='Making PDF…';
   try{
     if(!window.jspdf)await loadScript('jspdf.umd.min.js');
-    var doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, y=M, ink=[28,37,44], mute=[93,107,118], line=[211,218,224], green=[46,168,102], pink=[214,40,96];
+    var doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=15, iw=W-2*M, y=M;
+    var ink=[28,37,44], mute=[96,108,118], line=[214,220,225], green=[38,150,92], pink=[210,38,94], band=[243,246,248];
     function txt(s,x,yy,o){doc.text(String(s),x,yy,o||{});}
     function font(sz,st,col){doc.setFont('helvetica',st||'normal'); doc.setFontSize(sz); doc.setTextColor.apply(doc,col||ink);}
-    var onePage=mode!=='part', iw=W-2*M;
-    // heading
-    font(18,'bold'); txt('Powder coating schedule',M,y+6);
-    font(9.5,'normal',mute); txt(info.date.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'}),W-M,y+2,{align:'right'}); if(info.job)txt('Ref: '+info.job,W-M,y+7.5,{align:'right'});
-    y+=13; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=7;
-    // who it's from, what it is, what coating (larger text)
-    var left=[['From',info.company],['Contact',info.contact]].filter(function(r){return r[1];}), right=[['Model',info.model],['File',info.file],['Coating',info.coating||'To be confirmed']];
-    var y0=y, lh=6.8;
-    font(11,'bold',mute); left.forEach(function(r,i){txt(r[0],M,y0+i*lh);}); font(11,'normal'); left.forEach(function(r,i){txt(doc.splitTextToSize(r[1],68)[0],M+21,y0+i*lh);});
-    font(11,'bold',mute); right.forEach(function(r,i){txt(r[0],108,y0+i*lh);}); font(11,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',66)[0],128,y0+i*lh);});
-    y=y0+Math.max(left.length,right.length)*lh+1;
-    // summary band: area, counts, weight, and the overall size (whatever the list style)
-    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.adj;}), wts=rows.map(rowWeight), allW=wts.every(function(w2){return w2!=null;}), tw=wts.reduce(function(a,w2,i){return a+(w2||0)*rows[i].qty;},0);
-    var od=reportOverall||[0,0,0], masked=rows.filter(function(g){return g.mask;}), ms=maskSummary(), maskM2=(paint.res.maskArea||0)/1e6;
-    doc.setFillColor(240,246,242); doc.roundedRect(M,y,iw,40,2,2,'F');
-    font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt(mode==='part'?'PARTS':'ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
-    font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'at least '+num(tw,1)+' kg':'n/a'),M+140,y+16);
-    doc.setDrawColor(214,226,219); doc.line(M+5,y+21,W-M-5,y+21);
-    font(8,'bold',mute); txt('OVERALL SIZE  L × W × H',M+5,y+28); font(16,'bold'); txt(od.join(' × ')+' mm',M+5,y+36);
-    if(ms.n){font(8,'bold',pink); txt('KEEP UNCOATED',M+105,y+28); font(10.5,'bold',pink); txt(ms.n+' surface'+(ms.n>1?'s':'')+(info.iso?', arrowed below':''),M+105,y+33.5); font(8,'normal',mute); txt(num(maskM2,3)+' m², not included in the area',M+105,y+38);}
-    y+=46;
-    // measure the table and notes first, so the picture can take the space that's left on page 1
-    var cols=[['#',8,'l'],[{sub:'Sub-assembly',whole:'Item',part:'Part'}[mode]||'Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
+    function label(s,x,yy){font(7.5,'bold',mute); txt(s.toUpperCase(),x,yy);}
+    var onePage=mode!=='part';
+    var Q=repSets(), pieces=rows.reduce(function(a,g){return a+g.qty;},0)*Q, area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0)*Q;
+    var wts=rows.map(rowWeight), allW=wts.every(function(w2){return w2!=null;}), tw=wts.reduce(function(a,w2,i){return a+(w2||0)*rows[i].qty;},0)*Q;
+    var od=reportOverall||[0,0,0], masked=rows.filter(function(g){return g.mask;}), nMask=paint.masks.size;
+    var lca=lcaOf(paint.res.items.map(function(it){return it.node;})), subject=baseName(lca===state.root?state.root.name:lca.name);
+    var mats=[]; rows.forEach(function(g){var m=matInfo(g.mat); if(m&&mats.indexOf(m[1])<0)mats.push(m[1]);});
+    var dateS=info.date.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'});
+
+    // 1. title, what it's for, reference and date
+    font(19,'bold'); txt('Powder coating quote request',M,y+6);
+    font(9.5,'normal',mute); txt(dateS,W-M,y+1.5,{align:'right'});
+    if(info.job){font(10.5,'bold'); txt('Ref: '+info.job,W-M,y+7,{align:'right'});}
+    font(12,'normal',mute); txt(doc.splitTextToSize(subject,iw-50)[0],M,y+13);
+    y+=18; doc.setDrawColor.apply(doc,line); doc.setLineWidth(0.3); doc.line(M,y,W-M,y); y+=7;
+
+    // 2. from (left) and the coating wanted (right)
+    var colR=M+iw*0.5, yL=y, yR=y;
+    label('From',M,yL); yL+=5.5;
+    if(info.company){font(12,'bold'); txt(doc.splitTextToSize(info.company,iw*0.46)[0],M,yL); yL+=5.6;}
+    if(info.contact){font(10.5,'normal'); doc.splitTextToSize(info.contact,iw*0.46).slice(0,2).forEach(function(l){txt(l,M,yL); yL+=5;});}
+    if(!info.company&&!info.contact){font(10.5,'normal',mute); txt('Not given',M,yL); yL+=5;}
+    label('Coating required',colR,yR); yR+=5.5;
+    font(12,'bold'); doc.splitTextToSize(info.coating||'To be confirmed',iw*0.5).slice(0,2).forEach(function(l){txt(l,colR,yR); yR+=5.6;});
+    font(10,'normal',mute); txt('Material: ',colR,yR); font(10,'normal'); txt(mats.length?mats.join(', '):'Not specified',colR+doc.getTextWidth('Material: ')+0.5,yR); yR+=5;
+    font(10,'normal',mute); txt('Masking: ',colR,yR); font(10,'bold',nMask?pink:ink); txt(nMask?'Yes, '+nMask+' surface'+(nMask>1?'s':'')+' (pink, arrowed)':'None',colR+doc.getTextWidth('Masking: ')+0.5,yR); yR+=5;
+    y=Math.max(yL,yR)+4;
+
+    // 3. the job at a glance
+    var bh=Q>1?27:22; doc.setFillColor.apply(doc,band); doc.roundedRect(M,y,iw,bh,2,2,'F');
+    // quantity first, in its own darker tile, so it can't be missed
+    doc.setFillColor(28,37,44); doc.roundedRect(M,y,27,bh,2,2,'F');
+    font(7.5,'bold',[200,208,214]); txt('QUANTITY',M+4,y+7); font(19,'bold',[255,255,255]); txt(String(Q),M+4,y+17); if(Q>1){font(7,'normal',[200,208,214]); txt('of each item',M+4,y+22.5);}
+    var kx=[M+32,M+73,M+95,M+153];
+    label('Total area to coat',kx[0],y+7); label('Pieces',kx[1],y+7); label('Overall size L × W × H',kx[2],y+7); label('Est. weight',kx[3],y+7);
+    font(15,'bold',green); txt(num(area,2)+' m²',kx[0],y+16);
+    font(15,'bold'); txt(String(pieces),kx[1],y+16); txt(od.join(' × ')+' mm',kx[2],y+16);
+    txt(allW?num(tw,1)+' kg':'Not given',kx[3],y+16);
+    if(Q>1){font(7.5,'normal',mute); txt(num(area/Q,2)+' m² each',kx[0],y+22); txt(pieces/Q+' each',kx[1],y+22); txt('each item',kx[2],y+22); if(allW)txt(num(tw/Q,1)+' kg each',kx[3],y+22);}
+    y+=bh+6;
+
+    // work out the space the table and notes need, so sub-assembly reports stay on one page
+    var cols=[['#',7,'l'],[{sub:'Item',whole:'Item',part:'Part'}[mode]||'Item',55,'l'],['Qty',10,'r'],['Material',27,'l'],['Size L × W × H mm',33,'r'],['m² each',14,'r'],['m² total',16,'r'],['kg each',18,'r']], tx=[M];
     cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
-    font(8.5,'normal');
-    var meta=rows.map(function(g){var nl=doc.splitTextToSize(g.name,cols[1][1]-2); return {nl:nl,rh:(nl.length+(g.mask?1:0))*4.2+1.6};});
-    var tableH=6.5+meta.reduce(function(a,m2){return a+m2.rh+1.2;},0)+8;
-    var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are outside dimensions.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
-    if(anyManual)method+=' Areas marked * were adjusted by hand from the worked-out figure: '+rows.map(function(g,i){return g.adj?'line '+(i+1)+' '+(g.adj>0?'+':'-')+Math.abs(g.adj)+'%':null;}).filter(Boolean).join(', ')+'.';
-    var blocks=[];
-    if(masked.length){
-      var names=masked.map(function(g){return g.name;}), list=names.length===1?names[0]:names.slice(0,-1).join(', ')+' and '+names[names.length-1];
-      blocks.push(['Surfaces to keep uncoated',(names.length===1?'This part has surfaces that remain uncoated: '+list+'.':'These parts have surfaces that remain uncoated: '+list+'.')+(info.iso?' They are shown in pink and arrowed in the picture.':'')+' Please mask them before coating. Their area ('+num(maskM2,3)+' m²) is not included in the total.',pink]);
-    }
-    if(info.notes)blocks.push(['Notes',info.notes]);
-    blocks.push(['How the area was worked out',method]);
-    var notesH=blocks.reduce(function(a,b){font(b[0]==='How the area was worked out'?8.5:9.5,'normal'); return a+5+doc.splitTextToSize(b[1],iw).length*(b[0]==='How the area was worked out'?4.2:4.8)+4;},0);
-    // picture: one page for sub-assembly and whole-selection reports
+    font(9,'normal');
+    var meta=rows.map(function(g){var nl=doc.splitTextToSize(g.name,cols[1][1]-2); return {nl:nl,rh:nl.length*4.4+(g.mask?3.8:0)+3};});
+    var tableH=8+meta.reduce(function(a,m2){return a+m2.rh;},0)+9;
+    var maskLines=masked.map(function(g){return g.name+(g.qty*Q>1?' (×'+g.qty*Q+')':'');});
+    font(10,'normal'); var notesL=info.notes?doc.splitTextToSize(info.notes,iw):[];
+    var maskH=masked.length?7+masked.length*5.2+(info.iso?5:0)+3:0, notesH=notesL.length?7+notesL.length*4.8+3:0, footH=12;
+
+    // 4. picture of the whole assembly, with masking arrows
     if(info.iso){
-      var ih=iw*0.56;
-      if(onePage)ih=Math.max(40,Math.min(iw*0.56,(H-16)-y-tableH-notesH-11));
+      var ih=iw*0.55;
+      if(onePage)ih=Math.max(42,Math.min(iw*0.55,(H-M)-y-tableH-maskH-notesH-footH-9));
       btn.textContent='Making the picture…'; await new Promise(function(r){setTimeout(r,0);});
-      var shown=state.meshes.filter(function(m){return m.visible;}), other=shown.some(function(m){return !m.userData.paintIn;}), arrows=[];
+      var shown=state.meshes.filter(function(m){return m.visible;}), arrows=[];
       paint.masks.forEach(function(e){if(e.mesh.visible)arrows.push(faceCentre(e.mesh,e.shell));});
-      var pw=1600, img=modelPicture(shown,pw,Math.round(pw*ih/iw),arrows);
+      var img=modelPicture(shown,1600,Math.round(1600*ih/iw),arrows,true);
       doc.addImage(img,'JPEG',M,y,iw,ih); doc.setDrawColor.apply(doc,line); doc.rect(M,y,iw,ih);
-      font(8,'normal',mute); txt('Isometric view of the assembly. Surfaces to coat are green'+(arrows.length?', surfaces to keep uncoated are pink (arrowed)':'')+(other?', other parts are faint.':'.'),M,y+ih+4.5);
-      y+=ih+10;
+      // legend
+      var lx=M, ly=y+ih+4.6;
+      doc.setFillColor(46,184,110); doc.rect(lx,ly-2.6,3.2,3.2,'F'); font(8.5,'normal'); txt('Coat',lx+4.6,ly); lx+=17;
+      if(arrows.length){doc.setFillColor.apply(doc,pink); doc.rect(lx,ly-2.6,3.2,3.2,'F'); txt('Mask, do not coat (arrowed)',lx+4.6,ly); lx+=50;}
+      if(shown.some(function(m){return !m.userData.paintIn;})){doc.setFillColor(205,210,214); doc.rect(lx,ly-2.6,3.2,3.2,'F'); font(8.5,'normal'); txt('Not part of this quote (shown faint)',lx+4.6,ly);}
+      y+=ih+9;
       if(!onePage&&y>H-60){doc.addPage(); y=M+4;}
     }
-    // table
-    function head(){font(8,'bold',mute); cols.forEach(function(c,i){txt(c[0],c[2]==='r'?tx[i+1]-1:tx[i]+1,y,c[2]==='r'?{align:'right'}:{});}); y+=2; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=4.5;}
+
+    // 5. what to coat
+    function head(){
+      font(8,'bold',mute); cols.forEach(function(c,i){txt(c[0],c[2]==='r'?tx[i+1]-1:tx[i]+1,y+4,c[2]==='r'?{align:'right'}:{});});
+      y+=6; doc.setDrawColor.apply(doc,ink); doc.setLineWidth(0.35); doc.line(M,y,W-M,y); y+=2;
+    }
     head();
     rows.forEach(function(g,i){
       var mt=meta[i];
       if(!onePage&&y+mt.rh>H-22){doc.addPage(); y=M+4; head();}
-      var m=matInfo(g.mat), mk=g.adj?'*':'', ea=effArea(g), cells=[String(i+1),mt.nl,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
-      font(8.5,'normal'); cells.forEach(function(v,k){var c=cols[k]; if(k===3&&!m)doc.setTextColor.apply(doc,mute); txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y,c[2]==='r'?{align:'right'}:{}); doc.setTextColor.apply(doc,ink);});
-      if(g.mask){font(7.5,'bold',pink); txt('Has surfaces to keep uncoated',tx[1]+1,y+mt.nl.length*4.2);}
-      y+=mt.rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
+      var m=matInfo(g.mat), ea=effArea(g), w2=rowWeight(g);
+      var cells=[String(i+1),mt.nl,String(g.qty*Q),m?m[1]:'-',g.dims.join(' × '),num(ea,3),num(ea*g.qty*Q,3),w2!=null?num(w2,1):'-'];
+      font(9,'normal'); cells.forEach(function(v,k){var c=cols[k]; txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y+4.4,c[2]==='r'?{align:'right'}:{});});
+      if(g.mask){font(7.5,'bold',pink); txt('MASKING REQUIRED',tx[1]+1,y+4.4+mt.nl.length*4.4-0.6);}
+      y+=mt.rh; doc.setDrawColor(230,234,237); doc.setLineWidth(0.25); doc.line(M,y,W-M,y);
     });
-    font(8.5,'bold'); txt('Total',tx[1]+1,y); txt(String(pieces),tx[3]-1,y,{align:'right'}); txt(num(area,3),tx[7]-1,y,{align:'right'}); y+=8;
-    // notes, with the uncoated-surfaces note first
-    blocks.forEach(function(b){
-      var small=b[0]==='How the area was worked out', fs=small?8.5:9.5, lh2=small?4.2:4.8;
-      font(fs,'normal'); var L=doc.splitTextToSize(b[1],iw);
-      if(!onePage&&y+6+L.length*lh2>H-18){doc.addPage(); y=M+4;}
-      font(9.5,'bold',b[2]||ink); txt(b[0],M,y); y+=5; font(fs,'normal',b[2]?ink:mute); doc.text(L,M,y,{lineHeightFactor:small?1.18:1.2}); y+=L.length*lh2+4;
-    });
+    y+=1; doc.setDrawColor.apply(doc,ink); doc.setLineWidth(0.35); doc.line(M,y,W-M,y);
+    font(9.5,'bold'); txt('Total',tx[1]+1,y+5.5); txt(String(pieces),tx[3]-1,y+5.5,{align:'right'}); txt(num(area,3),tx[7]-1,y+5.5,{align:'right'}); if(allW)txt(num(tw,1),tx[8]-1,y+5.5,{align:'right'});
+    y+=12;
+
+    // 6. masking, then the customer's notes
+    if(masked.length){
+      if(!onePage&&y+maskH>H-20){doc.addPage(); y=M+4;}
+      font(10.5,'bold',pink); txt('Masking required',M,y); y+=6;
+      font(10,'normal');
+      maskLines.forEach(function(l){doc.setFillColor.apply(doc,pink); doc.circle(M+1.3,y-1.2,0.8,'F'); txt(l,M+4.5,y); y+=5.2;});
+      if(info.iso){font(9.5,'normal',mute); txt('The surfaces to protect are shown in pink and arrowed in the picture. They are not included in the area.',M,y); y+=5;}
+      y+=3;
+    }
+    if(notesL.length){
+      if(!onePage&&y+notesH>H-20){doc.addPage(); y=M+4;}
+      font(10.5,'bold'); txt('Notes',M,y); y+=6; font(10,'normal'); doc.text(notesL,M,y,{lineHeightFactor:1.2}); y+=notesL.length*4.8+3;
+    }
+
+    // footer on every page: how the area was measured (one line), reference, page numbers
     var np=doc.getNumberOfPages();
-    for(var p=1;p<=np;p++){doc.setPage(p); font(7.5,'normal',mute); txt((info.job?info.job+', ':'')+(info.model||''),M,H-8); txt('Page '+p+' of '+np,W-M,H-8,{align:'right'});}
-    doc.save((info.job||info.model||'Coating')+' coating schedule.pdf'); histSave(info);
-    toast('Coating report saved'+(np>1&&onePage?' (it needed '+np+' pages)':''));
+    for(var p=1;p<=np;p++){
+      doc.setPage(p); doc.setDrawColor.apply(doc,line); doc.setLineWidth(0.3); doc.line(M,H-14,W-M,H-14);
+      font(7.5,'normal',mute); txt('Areas are the outside surfaces calculated from the 3D model; inside faces of closed tubes, faces joined to other parts and masked surfaces are excluded.',M,H-10);
+      txt((info.job?'Ref '+info.job+'   ':'')+subject+'   '+dateS,M,H-6); txt('Page '+p+' of '+np,W-M,H-6,{align:'right'});
+    }
+    doc.save((info.job||subject||'Coating')+' powder coating quote request.pdf'); histSave(info);
+    toast('Quote request saved'+(np>1&&onePage?' (it needed '+np+' pages)':''));
   }catch(e){console.error(e); toast('The PDF couldn’t be made: '+e.message);}
   finally{btn.disabled=false; btn.textContent='Create PDF';}
 }
@@ -2732,5 +2842,5 @@ $('btnMore').onclick=function(){
   menuBelow(b,items);
 };
 
-window.__edv={toggleMask:toggleMask,markPick:markPick,maskSummary:maskSummary,setMarking:setMarking,faceCentre:faceCentre,paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,reportRows:reportRows,fillReportTable:fillReportTable,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={markBox:markBox,repSets:repSets,toggleMask:toggleMask,markPick:markPick,maskSummary:maskSummary,setMarking:setMarking,faceCentre:faceCentre,paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,reportRows:reportRows,fillReportTable:fillReportTable,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();

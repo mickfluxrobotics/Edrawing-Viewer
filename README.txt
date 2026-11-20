@@ -1,4 +1,4 @@
-eDrawings Viewer (version 15)
+eDrawings Viewer (version 17)
 
 Version 10 adds undo/redo, right-click menus, transparency, a view cube, section view, saved views,
 parts list export, snapshots with markup, recent files, printing for drawings and extra drawing snaps.
