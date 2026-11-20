@@ -143,7 +143,7 @@ function styleMesh(m){
   if(displayMode==='wire')m.material=hiddenMat;
   else if(displayMode==='hlr')m.material=tr?hiddenMat:hlrMat;
   else m.material=sel?selMat:(hov?hovMat:(state.paintView?(m.userData.paintIn?paintGreyMat:transMat(m.userData.base)):(tr?transMat(m.userData.base):m.userData.base)));
-  var pov=m.userData.paintOv, pvis=!!state.paintView&&m.visible&&!sel&&!hov; if(pov)pov.visible=pvis; if(m.userData.paintPart)m.userData.paintPart.visible=pvis;
+  var pov=m.userData.paintOv, pvis=!!state.paintView&&m.visible&&!sel&&!hov; if(pov)pov.visible=pvis; if(m.userData.paintPart)m.userData.paintPart.visible=pvis; if(m.userData.maskOvs)m.userData.maskOvs.forEach(function(o){o.visible=!!paint.on&&m.visible;});
   var ed=m.userData.edges;
   if(ed){ed.material=((sel||hov)&&lines)?selEdgeMat:(tr?edgeFaintMat:edgeMat); ed.visible=m.visible&&displayMode!=='shaded';}
 }
@@ -265,7 +265,7 @@ async function convertDwg(buf){
 }
 var geomCache=new Map();
 function clearModel(){
-  if(paint.on)setPaint(false); clearPaint();
+  if(paint.on)setPaint(false); clearPaint(); resetMasks();
   hoverNode(null); closeMenu(); setSection(false); $('printDlg').hidden=true;
   clearAll(); setMeasuring(false); resetUndo();
   if(state.is2d)setMode2d(false);
@@ -381,7 +381,7 @@ function renderStats(html){
   var st=$('stats'), extra='';
   if(state.unitless)extra+='<label>File units <select id="selFileUnit" aria-label="Units the file was drawn in">'+['mm','cm','m','in'].map(function(u){return '<option value="'+u+'"'+(UNIT_SCALE[u]===state.unitScale?' selected':'')+'>'+u+'</option>';}).join('')+'</select></label>';
   if(state.kind==='mesh')extra+='<label>Up <select id="selUp" aria-label="Up axis"><option value="z"'+(state.up==='z'?' selected':'')+'>Z</option><option value="y"'+(state.up==='y'?' selected':'')+'>Y</option></select></label>';
-  st.innerHTML=html+'<br>viewer version 14';
+  st.innerHTML=html+'<br>viewer version 15';
   $('modelOpts').innerHTML=extra?'<div class="pop-sep"></div>'+extra.replace(/<label>/g,'<label class="pop-row">').replace(/<select /g,'<select class="btn" '):'';
   var fu=$('selFileUnit');
   if(fu)fu.onchange=function(){if(paint.res){clearPaint(); renderPaintPanel();} state.unitScale=UNIT_SCALE[this.value]; setPref('unit.'+state.fileKind,this.value); clearMeasure(); applyModelTransform(); if(state.is2d){d2SetSel([]); fit(null,new THREE.Vector3(0,0,1)); d2Fit();} else fit(); updateMass();};
@@ -1184,6 +1184,7 @@ var UNITS={mm:[1000,2],cm:[100,3],m:[1,4],in:[39.37007874,3]};
 function fmt(v){var u=UNITS[state.units]; return (v*u[0]).toFixed(u[1])+' '+state.units;}
 function fmtA(rad){return (rad*180/Math.PI).toFixed(2)+'°';}
 function setMeasuring(on){
+  if(on&&paint.marking)setMarking(false);
   state.measuring=on; $('btnMeasure').setAttribute('aria-pressed',on);
   view.classList.toggle('measuring',on);
   clearHover();
@@ -1334,7 +1335,7 @@ var down=null, band=null, rot=null;
 function endRotate(){if(!rot)return; try{renderer.domElement.releasePointerCapture(rot.id);}catch(err){} rot=null; state.pivotAt=null; pivotEl.style.display='none'; needsRender=true;}
 renderer.domElement.addEventListener('mousedown',function(e){if(e.button===1)e.preventDefault();});
 renderer.domElement.addEventListener('auxclick',function(e){e.preventDefault();});
-renderer.domElement.addEventListener('pointerleave',function(){mouse.inside=false; if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
+renderer.domElement.addEventListener('pointerleave',function(){mouse.inside=false; if(paint.marking)maskHover(null); if(hover.timer!==null){clearTimeout(hover.timer); hover.timer=null;} clearHover();});
 function endBand(){if(band){band.remove(); band=null;}}
 renderer.domElement.addEventListener('pointerdown',function(e){
   if(e.pointerType==='mouse'&&e.button===1&&state.meshes.length){   // double-click the wheel: zoom to fit
@@ -1352,13 +1353,14 @@ renderer.domElement.addEventListener('pointerdown',function(e){
     clearHover(); down=null; e.preventDefault(); needsRender=true; return;
   }
   down={x:e.clientX,y:e.clientY,t:performance.now(),b:e.button,box:false,id:e.pointerId,
-    canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&state.meshes.length>0};
+    canBox:e.button===0&&e.pointerType==='mouse'&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!state.measuring&&!paint.marking&&state.meshes.length>0};
   if(down.canBox){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
 });
 renderer.domElement.addEventListener('pointermove',function(e){
   mouse.x=e.clientX; mouse.y=e.clientY; mouse.inside=true;
   if(rot){rot.moved+=Math.abs(e.clientX-rot.x)+Math.abs(e.clientY-rot.y); if(rot.moved>6)lastMid=null; rotateAbout(rot.pivot,e.clientX-rot.x,e.clientY-rot.y); rot.x=e.clientX; rot.y=e.clientY; return;}
   if(state.measuring&&!down&&e.buttons===0&&e.pointerType==='mouse')queueHover(e.clientX,e.clientY);
+  if(paint.marking&&!down&&e.buttons===0&&e.pointerType==='mouse')queueMarkHover(e.clientX,e.clientY);
   if(!down||!down.canBox)return;
   if(!down.box&&Math.hypot(e.clientX-down.x,e.clientY-down.y)>5){down.box=true; band=document.createElement('div'); band.className='band'; hud.appendChild(band);}
   if(down.box){
@@ -1385,6 +1387,7 @@ renderer.domElement.addEventListener('pointerup',function(e){
   var moved=Math.hypot(e.clientX-d.x,e.clientY-d.y),dt=performance.now()-d.t;
   if(d.b===2){if(moved<5&&dt<800)contextMenu(e.clientX,e.clientY,false); return;}
   if(moved>5||dt>600||d.b!==0)return;
+  if(paint.marking&&!state.is2d){var mp2=markPick(e.clientX,e.clientY); if(mp2)toggleMask(mp2.mesh,mp2.shell); return;}
   if(state.measuring){var m=state.is2d?measurePick2d(e.clientX,e.clientY):measurePick(e.clientX,e.clientY); if(m){if(m.type==='face')m=faceEntity(m.mesh,m.shell); clearHover(); addEnt(m);} return;}
   if(state.is2d){
     var pid=d2Pick(e.clientX,e.clientY,7,false), add2=e.shiftKey||e.ctrlKey||e.metaKey, cur=Array.from(state.sel2d);
@@ -1407,6 +1410,7 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Escape'&&menuEl){closeMenu(); return;}
   if(e.key==='Escape'&&!$('reportDlg').hidden){$('reportDlg').hidden=true; return;}
   if(e.key==='Escape'&&document.querySelector('.pop:not([hidden])')){closePops(); return;}
+  if(e.key==='Escape'&&paint.marking){setMarking(false); renderPaintPanel(); return;}
   if(e.key==='Escape'&&!$('printDlg').hidden){$('printDlg').hidden=true; return;}
   if(e.key==='Escape'){
     if(typing&&t.id==='search'){t.blur();}
@@ -2216,6 +2220,7 @@ function paintScope(){
 }
 function setPaint(on){
   paint.on=on&&!state.is2d&&state.meshes.length>0;
+  if(paint.on)restoreMasks(); else setMarking(false);
   $('btnPaint').setAttribute('aria-pressed',paint.on);
   if(paint.on&&state.massOn){$('btnMass').click();}
   renderPaintPanel(); applyPaintView();
@@ -2248,9 +2253,12 @@ function renderPaintPanel(){
   h+='<label>Accuracy <select class="btn" id="pAcc">'+Object.keys(PAINT_ACC).map(function(k){return '<option value="'+k+'"'+(k===st.acc?' selected':'')+'>'+PAINT_ACC[k].label+'</option>';}).join('')+'</select></label></div>';
   h+='<div class="acts"><button class="btn primary" id="pRun"'+(paint.running?' disabled':'')+'>'+(r?'Recalculate':'Calculate')+'</button>'+(r?'<button class="btn" id="pReport">Coating report…</button><button class="btn" id="pClear">Clear</button>':'')+'</div>';
   h+='<p class="hint" id="pProg">'+(paint.running?'Working…':'')+'</p>';
+  var msum=maskSummary();
+  h+='<div class="pmask"><button class="btn" id="pMark" aria-pressed="'+paint.marking+'">Mark uncoated faces</button>'+(msum.n?'<span>'+msum.n+' marked</span><button class="btn" id="pMaskClear">Clear marks</button>':'')+'</div>';
+  if(paint.marking)h+='<p class="hint mk">Click faces that must stay free of coating, such as bearing seats and threads. They turn pink and aren’t counted. Click again to unmark. Esc when done.</p>';
   if(r){
     h+='<div class="big">'+fmtArea(r.total/1e6)+'</div>';
-    h+='<p class="sub">painted, out of '+fmtArea(r.all/1e6)+' of surface in '+r.items.length+' item'+(r.items.length===1?'':'s')+'.</p>';
+    h+='<p class="sub">painted, out of '+fmtArea(r.all/1e6)+' of surface in '+r.items.length+' item'+(r.items.length===1?'':'s')+'.'+(r.maskArea?' '+fmtArea(r.maskArea/1e6)+' on faces marked uncoated is left out.':'')+'</p>';
     h+='<label class="chk"><input type="checkbox" id="paintShow"'+(state.paintView!==false?' checked':'')+'> Show counted surfaces in green</label>';
     var t=r.tubes; h+='<p class="hint">'+(t.capped?t.capped+' tube'+(t.capped>1?'s':'')+' capped (orange)':'No tubes capped')+(t.shortOpen?', '+t.shortOpen+' short tube'+(t.shortOpen>1?'s':'')+' left open':'')+(t.tooBig?', '+t.tooBig+' larger than the rule left open':'')+'. Grid '+num(r.grid.h,1)+' mm, so gaps up to about '+num(Math.max(r.grid.closes,st.gap),0)+' mm were closed.</p>';
     var list=r.items.slice().sort(function(a,b){return b.counted-a.counted;}), top=list.slice(0,8);
@@ -2261,6 +2269,8 @@ function renderPaintPanel(){
   function keep(id,key){$(id).onchange=function(){setPref('paint.'+key,this.value);};}
   keep('pGap','gap'); keep('pCapW','capW'); keep('pCapH','capH'); keep('pMinLen','minLen'); keep('pAcc','acc');
   $('pRun').onclick=runPaint;
+  $('pMark').onclick=function(){setMarking(!paint.marking); renderPaintPanel();};
+  if($('pMaskClear'))$('pMaskClear').onclick=function(){Array.from(paint.masks.keys()).forEach(removeMask); saveMasks(); applyMasks(); renderPaintPanel(); needsRender=true; toast('Marks cleared');};
   if(r){$('pClear').onclick=function(){clearPaint(); renderPaintPanel();}; $('pReport').onclick=openReport; $('paintShow').onchange=applyPaintView;}
 }
 function runPaint(){
@@ -2288,10 +2298,10 @@ function runPaint(){
     if(d.progress!=null){var pg=$('pProg'); if(pg)pg.textContent=d.msg+'… '+Math.round(d.progress*100)+'%'; return;}
     paint.worker.terminate(); paint.worker=null; paint.running=false;
     if(d.error){toast('Paint area couldn’t be worked out: '+d.error); renderPaintPanel(); return;}
-    var res=d.result, all=0; paint.meshArea=new Map();
+    var res=d.result, all=0; paint.meshArea=new Map(); paint.meshRaw=new Map();
     res.bodies.forEach(function(b,k){
       var mp=map[k], m=mp.mesh, f=b.flags, ix=m.geometry.getIndex().array, keep=[];
-      mp.item.counted+=b.counted; mp.item.area+=b.area; all+=b.area; paint.meshArea.set(m,b.counted);
+      mp.item.counted+=b.counted; mp.item.area+=b.area; all+=b.area; paint.meshArea.set(m,b.counted); paint.meshRaw.set(m,b.counted); m.userData.paintFrac=b.frac;
       for(var t=0;t<f.length;t++)if(f[t])keep.push(ix[3*t],ix[3*t+1],ix[3*t+2]);
       m.userData.paintIn=true;
       if(keep.length){
@@ -2316,14 +2326,103 @@ function runPaint(){
       var cm=new THREE.Mesh(g2,capMat); cm.raycast=function(){}; grp.add(cm);
     });
     grp.visible=false; scene.add(grp); paint.caps=grp;
-    paint.res={items:items,total:res.counted,all:all,tubes:res.tubes,grid:res.grid,settings:st,secs:(performance.now()-t0)/1000,scope:sc.label};
+    paint.res={items:items,total:res.counted,all:all,tubes:res.tubes,grid:res.grid,settings:st,secs:(performance.now()-t0)/1000,scope:sc.label}; applyMasks();
     state.paintView=true; renderPaintPanel(); applyPaintView();
-    toast('Painted area '+fmtArea(res.counted/1e6)+' (worked out in '+Math.max(1,Math.round(paint.res.secs))+' s)');
+    toast('Painted area '+fmtArea(paint.res.total/1e6)+' (worked out in '+Math.max(1,Math.round(paint.res.secs))+' s)');
   };
   paint.worker.onerror=function(e){if(e.preventDefault)e.preventDefault(); paint.running=false; if(paint.worker){paint.worker.terminate(); paint.worker=null;} toast('Paint area stopped unexpectedly. Try Fast, or select fewer parts.'); renderPaintPanel();};
   var tr=[]; bodies.forEach(function(b){tr.push(b.pos.buffer,b.idx.buffer);});
   paint.worker.postMessage({bodies:bodies,gap:st.gap,capW:st.capW,capH:st.capH,minLen:st.minLen,targetH:acc.targetH,budget:acc.budget},tr);
 }
+
+// ---------- surfaces to keep uncoated (masked) ----------
+var maskMat=new THREE.MeshPhongMaterial({color:0xE8336B,side:THREE.DoubleSide,shininess:20,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+var maskHovMat=new THREE.MeshBasicMaterial({color:0xE8336B,transparent:true,opacity:0.45,side:THREE.DoubleSide,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3});
+maskMat.clippingPlanes=clipPlanes; maskHovMat.clippingPlanes=clipPlanes;
+paint.masks=new Map(); paint.marking=false; paint.meshRaw=new Map();
+function maskKey(m,s){return state.meshes.indexOf(m)+':'+s;}
+function faceGeo(m,s){
+  var g=m.userData.g, a=g.shellStart[s], b=g.shellStart[s+1], src=g.geo.getIndex().array, geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',g.geo.getAttribute('position')); if(g.geo.getAttribute('normal'))geo.setAttribute('normal',g.geo.getAttribute('normal'));
+  geo.setIndex(new THREE.BufferAttribute(new Uint32Array(src.subarray(a,b)),1)); geo.boundingSphere=g.geo.boundingSphere; geo.boundingBox=g.geo.boundingBox;
+  return geo;
+}
+function addMask(m,s){
+  var key=maskKey(m,s); if(paint.masks.has(key))return;
+  var ov=new THREE.Mesh(faceGeo(m,s),maskMat); ov.matrixAutoUpdate=false; ov.matrix.copy(m.matrix); ov.raycast=function(){}; ov.renderOrder=3; ov.visible=paint.on&&m.visible;
+  modelRoot.add(ov); ov.updateMatrixWorld(true);
+  (m.userData.maskOvs=m.userData.maskOvs||[]).push(ov);
+  paint.masks.set(key,{mesh:m,shell:s,ov:ov});
+}
+function removeMask(key){
+  var e=paint.masks.get(key); if(!e)return;
+  modelRoot.remove(e.ov); e.ov.geometry.dispose();
+  var arr=e.mesh.userData.maskOvs||[]; arr.splice(arr.indexOf(e.ov),1);
+  paint.masks.delete(key);
+}
+function saveMasks(){if(state.fileKey)setPref('mask.'+state.fileKey,JSON.stringify(Array.from(paint.masks.keys())));}
+function restoreMasks(){
+  if(paint.masks.size||!state.fileKey)return;
+  var a; try{a=JSON.parse(pref('mask.'+state.fileKey)||'[]');}catch(e){a=[];}
+  (Array.isArray(a)?a:[]).forEach(function(k){var p=String(k).split(':'), m=state.meshes[+p[0]], s=+p[1]; if(m&&m.userData.g&&s>=0&&s+1<m.userData.g.shellStart.length)addMask(m,s);});
+}
+function resetMasks(){paint.masks=new Map(); state.meshes.forEach(function(m){m.userData.maskOvs=null;}); setMarking(false);}
+// area of one face in mm², either all of it or only the part Paint area counted
+function faceArea(m,s,counted){
+  var g=m.userData.g, ix=g.geo.getIndex().array, pa=g.geo.getAttribute('position'), W=m.matrixWorld, f=counted?m.userData.paintFrac:null;
+  var a=new THREE.Vector3(), b=new THREE.Vector3(), c=new THREE.Vector3(), sum=0;
+  for(var i=g.shellStart[s];i<g.shellStart[s+1];i+=3){
+    a.fromBufferAttribute(pa,ix[i]).applyMatrix4(W); b.fromBufferAttribute(pa,ix[i+1]).applyMatrix4(W); c.fromBufferAttribute(pa,ix[i+2]).applyMatrix4(W);
+    var A=b.sub(a).cross(c.sub(a)).length()/2*1e6; sum+=f?A*(f[i/3]||0):A;
+  }
+  return sum;
+}
+function faceCentre(m,s){
+  var g=m.userData.g, ix=g.geo.getIndex().array, pa=g.geo.getAttribute('position'), W=m.matrixWorld, v=new THREE.Vector3(), c=new THREE.Vector3(), n=0;
+  for(var i=g.shellStart[s];i<g.shellStart[s+1];i++){v.fromBufferAttribute(pa,ix[i]).applyMatrix4(W); c.add(v); n++;}
+  return n?c.divideScalar(n):c;
+}
+function maskDeduct(m){var d=0; (m.userData.maskOvs||[]).length&&paint.masks.forEach(function(e){if(e.mesh===m)d+=faceArea(m,e.shell,true);}); return d;}
+function meshHasMask(m){return !!(m.userData.maskOvs&&m.userData.maskOvs.length);}
+// take marked faces out of the worked-out areas (no need to recalculate)
+function applyMasks(){
+  if(!paint.res)return;
+  var tot=0, md=0;
+  paint.res.items.forEach(function(it){
+    var c=0; it.meshes.forEach(function(m){var raw=paint.meshRaw.get(m)||0, d=Math.min(raw,maskDeduct(m)); paint.meshArea.set(m,raw-d); c+=raw-d; md+=d;});
+    it.counted=c; tot+=c;
+  });
+  paint.res.total=tot; paint.res.maskArea=md;
+}
+function maskSummary(){
+  var n=paint.masks.size, raw=0; paint.masks.forEach(function(e){raw+=faceArea(e.mesh,e.shell,false);});
+  return {n:n,raw:raw};
+}
+function toggleMask(m,s){
+  var key=maskKey(m,s), on=!paint.masks.has(key);
+  if(on)addMask(m,s); else removeMask(key);
+  saveMasks(); applyMasks(); renderPaintPanel(); applyPaintView(); needsRender=true;
+  toast(on?'Marked to stay uncoated':'Unmarked');
+}
+function setMarking(on){
+  paint.marking=!!on&&paint.on&&!state.is2d;
+  if(paint.marking&&state.measuring)setMeasuring(false);
+  view.classList.toggle('marking',paint.marking);
+  var b=$('pMark'); if(b)b.setAttribute('aria-pressed',paint.marking);
+  if(!paint.marking)maskHover(null);
+}
+var mhov={ov:null,key:null,timer:null,x:0,y:0};
+function maskHover(pick){
+  var key=pick?maskKey(pick.mesh,pick.shell):null;
+  if(key===mhov.key)return;
+  if(mhov.ov){modelRoot.remove(mhov.ov); mhov.ov.geometry.dispose(); mhov.ov=null;}
+  mhov.key=key; needsRender=true;
+  if(!pick)return;
+  var ov=new THREE.Mesh(faceGeo(pick.mesh,pick.shell),maskHovMat); ov.matrixAutoUpdate=false; ov.matrix.copy(pick.mesh.matrix); ov.raycast=function(){}; ov.renderOrder=4;
+  modelRoot.add(ov); ov.updateMatrixWorld(true); mhov.ov=ov;
+}
+function markPick(x,y){var h=rayHit(x,y); if(!h||h.faceIndex==null||!h.object.userData.g)return null; return {mesh:h.object,shell:shellOfHit(h)};}
+function queueMarkHover(x,y){mhov.x=x; mhov.y=y; if(mhov.timer===null)mhov.timer=setTimeout(function(){mhov.timer=null; if(paint.marking)maskHover(markPick(mhov.x,mhov.y));},50);}
 
 // ---------- coating report ----------
 var MATS=[['steel','Mild steel',7850],['galv','Galvanised steel',7850],['stainless','Stainless steel',8000],['aluminium','Aluminium',2700],['brass','Brass',8500],['cast','Cast iron',7200]];
@@ -2404,7 +2503,7 @@ function reportRows(mode){
   reportUnits(mode).forEach(function(it){
     var dims=itemDims(it.meshes), name=baseName(it.name), key=mode+'|'+name+'|'+dims.map(function(d){return Math.round(d/2);}).join('x');
     var g=groups.get(key); if(!g){g={key:key,name:name,qty:0,dims:dims,each:0,sum:0,vol:itemVolume(it.meshes)}; groups.set(key,g);}
-    g.qty++; g.sum+=it.counted/1e6; g.each=g.sum/g.qty;   // identical items can differ slightly where they touch others: use the average
+    g.mask=g.mask||it.meshes.some(meshHasMask); g.qty++; g.sum+=it.counted/1e6; g.each=g.sum/g.qty;   // identical items can differ slightly where they touch others: use the average
   });
   return Array.from(groups.values()).sort(function(a,b){return a.name.localeCompare(b.name,undefined,{numeric:true});}).map(function(g){g.mat=pref('mat.'+g.name)||''; g.adj=r.adj[g.key]||0; return g;});
 }
@@ -2435,11 +2534,12 @@ function fillReportTable(mode){
 }
 function rpSummary(){
   var rows=reportState.rows, adj=rows.filter(function(g){return g.adj;}).length;
-  $('rpSummary').textContent=rows.length+' line'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' piece'+(rows.reduce(function(a,g){return a+g.qty;},0)===1?'':'s')+', '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(adj?' ('+adj+' adjusted by hand)':'')+'.';
+  $('rpSummary').textContent=rows.length+' line'+(rows.length===1?'':'s')+', '+rows.reduce(function(a,g){return a+g.qty;},0)+' piece'+(rows.reduce(function(a,g){return a+g.qty;},0)===1?'':'s')+', '+num(rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0),3)+' m² to coat'+(adj?' ('+adj+' adjusted by hand)':'')+'. Overall size '+(reportOverall||[0,0,0]).join(' × ')+' mm'+(paint.masks.size?', '+paint.masks.size+' surface'+(paint.masks.size>1?'s':'')+' to keep uncoated':'')+'.';
 }
 function openReport(){
   if(!paint.res){toast('Work out the paint area first'); return;}
-  closeMenu();
+  closeMenu(); setMarking(false);
+  var allMs=[]; paint.res.items.forEach(function(it){allMs=allMs.concat(it.meshes);}); reportOverall=itemDims(allMs);
   var mode=pref('rep.mode'); if(!REP_MODES[mode])mode='sub';
   $('rpMode').value=mode;
   $('rpMode').onchange=function(){setPref('rep.mode',this.value); fillReportTable(this.value);};
@@ -2471,25 +2571,26 @@ function effArea(g){return g.each*(1+(g.adj||0)/100);}
 function rowWeight(g){var m=matInfo(g.mat); return m?g.vol*m[2]:null;}
 function reportCSV(){
   var info=reportInfo(), rows=reportState.rows;
-  var head=['Item','Name','Quantity','Material','Length mm','Width mm','Height mm','Worked-out area each m2','Adjustment %','Coated area each m2','Coated area total m2','Weight each kg'];
-  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),g.adj||0,ea.toFixed(4),(ea*g.qty).toFixed(4),w!=null?w.toFixed(2):''];});
+  var head=['Item','Name','Quantity','Material','Length mm','Width mm','Height mm','Worked-out area each m2','Adjustment %','Coated area each m2','Coated area total m2','Weight each kg','Has surfaces to keep uncoated'];
+  var data=rows.map(function(g,i){var w=rowWeight(g), m=matInfo(g.mat), ea=effArea(g); return [i+1,g.name,g.qty,m?m[1]:'',g.dims[0],g.dims[1],g.dims[2],g.each.toFixed(4),g.adj||0,ea.toFixed(4),(ea*g.qty).toFixed(4),w!=null?w.toFixed(2):'',g.mask?'yes':''];});
   var csv=[head].concat(data).map(function(r){return r.map(csvCell).join(',');}).join('\r\n');
   download(new Blob(['\ufeff'+csv],{type:'text/csv'}),(info.job||info.model||'Coating')+' coating schedule.csv'); histSave(info);
 }
 function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=function(){rej(new Error('couldn’t load '+src));}; document.head.appendChild(s);});}
 // A picture of one item on its own, coloured as counted, from the isometric direction.
-function modelPicture(meshes,w,h){
+function modelPicture(meshes,w,h,arrowPts){
   var keep=new Set(meshes), saved=[];
   modelRoot.children.forEach(function(o){saved.push([o,o.visible]);});
   state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.edges)m.userData.edges.visible=keep.has(m)&&displayMode!=='shaded'; if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
   var oldSel=state.sel.slice(); state.sel.forEach(function(n){meshesUnder(n).forEach(function(m){m.userData.sel=false;});}); state.paintView=true; state.meshes.forEach(styleMesh);
-  state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m);});
+  state.meshes.forEach(function(m){m.visible=keep.has(m); if(m.userData.paintOv)m.userData.paintOv.visible=keep.has(m); if(m.userData.paintPart)m.userData.paintPart.visible=keep.has(m); (m.userData.maskOvs||[]).forEach(function(o){o.visible=keep.has(m);});});
+  if(mhov.ov)mhov.ov.visible=false;
   var box=new THREE.Box3(); meshes.forEach(function(m){box.expandByObject(m);});
   var c=box.getCenter(new THREE.Vector3()), r=box.getSize(new THREE.Vector3()).length()/2||1, dir=new THREE.Vector3(1,0.75,1.15).normalize();
   var cam=new THREE.OrthographicCamera(-1,1,1,-1,-r*20,r*20); cam.position.copy(c).addScaledVector(dir,r*4); cam.up.set(0,1,0); cam.lookAt(c); cam.updateMatrixWorld();
   var inv=cam.matrixWorldInverse, x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity, cv=new THREE.Vector3();
   for(var ci=0;ci<8;ci++){cv.set(ci&1?box.max.x:box.min.x,ci&2?box.max.y:box.min.y,ci&4?box.max.z:box.min.z).applyMatrix4(inv); x0=Math.min(x0,cv.x); x1=Math.max(x1,cv.x); y0=Math.min(y0,cv.y); y1=Math.max(y1,cv.y);}
-  var cxp=(x0+x1)/2, cyp=(y0+y1)/2, hw=(x1-x0)/2*1.08, hh=(y1-y0)/2*1.08; if(hw/hh>w/h)hh=hw*h/w; else hw=hh*w/h;
+  var cxp=(x0+x1)/2, cyp=(y0+y1)/2, hw=(x1-x0)/2*1.1, hh=(y1-y0)/2*1.1; if(hw/hh>w/h)hh=hw*h/w; else hw=hh*w/h;
   cam.left=cxp-hw; cam.right=cxp+hw; cam.top=cyp+hh; cam.bottom=cyp-hh; cam.updateProjectionMatrix();
   var li=new THREE.DirectionalLight(0xffffff,0.62); li.position.set(-0.6,1,0.8); cam.add(li); scene.add(cam);
   var capsV=paint.caps?paint.caps.visible:false; if(paint.caps)paint.caps.visible=false;
@@ -2498,65 +2599,116 @@ function modelPicture(meshes,w,h){
   scene.remove(cam); if(paint.caps)paint.caps.visible=capsV;
   saved.forEach(function(s){s[0].visible=s[1];});
   applyVisibility(); setSelection(oldSel,{noScroll:true}); applyPaintView();
-  var cv=document.createElement('canvas'); cv.width=w; cv.height=h; var g=cv.getContext('2d'), im=g.createImageData(w,h);
+  var cvs=document.createElement('canvas'); cvs.width=w; cvs.height=h; var g=cvs.getContext('2d'), im=g.createImageData(w,h);
   for(var y=0;y<h;y++)im.data.set(px.subarray((h-1-y)*w*4,(h-y)*w*4),y*w*4);
   g.putImageData(im,0,0);
-  return cv.toDataURL('image/jpeg',0.86);
+  // arrows pointing at the surfaces to keep uncoated (nearby ones share an arrow)
+  if(arrowPts&&arrowPts.length){
+    var pts=[], R=0.05*w;
+    arrowPts.forEach(function(p){
+      var q=p.clone().project(cam), sx=(q.x+1)/2*w, sy=(1-q.y)/2*h;
+      if(sx<0||sy<0||sx>w||sy>h)return;
+      var hit=null; pts.forEach(function(c2){if(!hit&&Math.hypot(c2.x-sx,c2.y-sy)<R)hit=c2;});
+      if(hit){hit.x=(hit.x*hit.n+sx)/(hit.n+1); hit.y=(hit.y*hit.n+sy)/(hit.n+1); hit.n++;} else pts.push({x:sx,y:sy,n:1});
+    });
+    var col='#E8336B', L=0.11*w, mx=0.03*w, my=0.05*h;
+    pts.forEach(function(p){
+      var dx=p.x-w/2, dy=p.y-h/2, dl=Math.hypot(dx,dy)||1; dx/=dl; dy/=dl;
+      if(Math.abs(dx)<0.2&&Math.abs(dy)<0.2){dx=-0.7; dy=-0.7;}
+      var sx=Math.max(mx,Math.min(w-mx,p.x+dx*L)), sy=Math.max(my,Math.min(h-my,p.y+dy*L));
+      if(Math.hypot(sx-p.x,sy-p.y)<L*0.5){sx=Math.max(mx,Math.min(w-mx,p.x-dy*L)); sy=Math.max(my,Math.min(h-my,p.y+dx*L));}
+      var ang=Math.atan2(p.y-sy,p.x-sx), hl=0.022*w, tipX=p.x-Math.cos(ang)*0.006*w, tipY=p.y-Math.sin(ang)*0.006*w;
+      function shape(lw,colour){
+        g.strokeStyle=colour; g.fillStyle=colour; g.lineWidth=lw; g.lineCap='round';
+        g.beginPath(); g.moveTo(sx,sy); g.lineTo(tipX-Math.cos(ang)*hl*0.8,tipY-Math.sin(ang)*hl*0.8); g.stroke();
+        g.beginPath(); g.moveTo(tipX,tipY); g.lineTo(tipX-hl*Math.cos(ang-0.42),tipY-hl*Math.sin(ang-0.42)); g.lineTo(tipX-hl*Math.cos(ang+0.42),tipY-hl*Math.sin(ang+0.42)); g.closePath(); g.fill(); if(lw>0.008*w)g.stroke();
+      }
+      shape(0.012*w,'#ffffff'); shape(0.0055*w,col);
+    });
+  }
+  return cvs.toDataURL('image/jpeg',0.88);
 }
+var reportOverall=null;
 async function reportPDF(){
-  var info=reportInfo(), rows=reportState.rows, btn=$('rpPdf'); btn.disabled=true; btn.textContent='Making PDF…';
+  var info=reportInfo(), rows=reportState.rows, mode=reportState.mode, btn=$('rpPdf'); btn.disabled=true; btn.textContent='Making PDF…';
   try{
     if(!window.jspdf)await loadScript('jspdf.umd.min.js');
-    var doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, y=M, ink=[28,37,44], mute=[93,107,118], line=[211,218,224], green=[46,168,102];
+    var doc=new window.jspdf.jsPDF({unit:'mm',format:'a4'}), W=210, H=297, M=14, y=M, ink=[28,37,44], mute=[93,107,118], line=[211,218,224], green=[46,168,102], pink=[214,40,96];
     function txt(s,x,yy,o){doc.text(String(s),x,yy,o||{});}
     function font(sz,st,col){doc.setFont('helvetica',st||'normal'); doc.setFontSize(sz); doc.setTextColor.apply(doc,col||ink);}
+    var onePage=mode!=='part', iw=W-2*M;
     // heading
     font(18,'bold'); txt('Powder coating schedule',M,y+6);
-    font(9,'normal',mute); txt(info.date.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'}),W-M,y+2,{align:'right'}); if(info.job)txt('Ref: '+info.job,W-M,y+7,{align:'right'});
-    y+=13; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=6;
+    font(9.5,'normal',mute); txt(info.date.toLocaleDateString(undefined,{day:'numeric',month:'long',year:'numeric'}),W-M,y+2,{align:'right'}); if(info.job)txt('Ref: '+info.job,W-M,y+7.5,{align:'right'});
+    y+=13; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=7;
+    // who it's from, what it is, what coating (larger text)
     var left=[['From',info.company],['Contact',info.contact]].filter(function(r){return r[1];}), right=[['Model',info.model],['File',info.file],['Coating',info.coating||'To be confirmed']];
-    var y0=y;
-    font(9,'bold',mute); left.forEach(function(r,i){txt(r[0],M,y0+i*5.5);}); font(9,'normal'); left.forEach(function(r,i){txt(doc.splitTextToSize(r[1],70)[0],M+18,y0+i*5.5);});
-    font(9,'bold',mute); right.forEach(function(r,i){txt(r[0],110,y0+i*5.5);}); font(9,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',68)[0],128,y0+i*5.5);});
-    y=y0+Math.max(left.length,right.length)*5.5+3;
-    // summary
-    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.adj;}), wts=rows.map(rowWeight), allW=wts.every(function(w){return w!=null;}), tw=wts.reduce(function(a,w,i){return a+(w||0)*rows[i].qty;},0);
-    doc.setFillColor(240,246,242); doc.roundedRect(M,y,W-2*M,22,2,2,'F');
-    font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt('ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
-    font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'≥ '+num(tw,1)+' kg':'n/a'),M+140,y+16);
-    y+=28;
-    // isometric picture of the whole assembly, fitted to the frame
+    var y0=y, lh=6.8;
+    font(11,'bold',mute); left.forEach(function(r,i){txt(r[0],M,y0+i*lh);}); font(11,'normal'); left.forEach(function(r,i){txt(doc.splitTextToSize(r[1],68)[0],M+21,y0+i*lh);});
+    font(11,'bold',mute); right.forEach(function(r,i){txt(r[0],108,y0+i*lh);}); font(11,'normal'); right.forEach(function(r,i){txt(doc.splitTextToSize(r[1]||'',66)[0],128,y0+i*lh);});
+    y=y0+Math.max(left.length,right.length)*lh+1;
+    // summary band: area, counts, weight, and the overall size (whatever the list style)
+    var pieces=rows.reduce(function(a,g){return a+g.qty;},0), area=rows.reduce(function(a,g){return a+effArea(g)*g.qty;},0), anyManual=rows.some(function(g){return g.adj;}), wts=rows.map(rowWeight), allW=wts.every(function(w2){return w2!=null;}), tw=wts.reduce(function(a,w2,i){return a+(w2||0)*rows[i].qty;},0);
+    var od=reportOverall||[0,0,0], masked=rows.filter(function(g){return g.mask;}), ms=maskSummary(), maskM2=(paint.res.maskArea||0)/1e6;
+    doc.setFillColor(240,246,242); doc.roundedRect(M,y,iw,40,2,2,'F');
+    font(8,'bold',mute); txt('TOTAL AREA TO COAT',M+5,y+7); txt(mode==='part'?'PARTS':'ITEMS',M+70,y+7); txt('PIECES',M+105,y+7); txt('EST. WEIGHT',M+140,y+7);
+    font(16,'bold',green); txt(num(area,2)+' m²',M+5,y+16); font(16,'bold'); txt(String(rows.length),M+70,y+16); txt(String(pieces),M+105,y+16); txt(allW?num(tw,1)+' kg':(tw?'at least '+num(tw,1)+' kg':'n/a'),M+140,y+16);
+    doc.setDrawColor(214,226,219); doc.line(M+5,y+21,W-M-5,y+21);
+    font(8,'bold',mute); txt('OVERALL SIZE  L × W × H',M+5,y+28); font(16,'bold'); txt(od.join(' × ')+' mm',M+5,y+36);
+    if(ms.n){font(8,'bold',pink); txt('KEEP UNCOATED',M+105,y+28); font(10.5,'bold',pink); txt(ms.n+' surface'+(ms.n>1?'s':'')+(info.iso?', arrowed below':''),M+105,y+33.5); font(8,'normal',mute); txt(num(maskM2,3)+' m², not included in the area',M+105,y+38);}
+    y+=46;
+    // measure the table and notes first, so the picture can take the space that's left on page 1
+    var cols=[['#',8,'l'],[{sub:'Sub-assembly',whole:'Item',part:'Part'}[mode]||'Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
+    cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
+    font(8.5,'normal');
+    var meta=rows.map(function(g){var nl=doc.splitTextToSize(g.name,cols[1][1]-2); return {nl:nl,rh:(nl.length+(g.mask?1:0))*4.2+1.6};});
+    var tableH=6.5+meta.reduce(function(a,m2){return a+m2.rh+1.2;},0)+8;
+    var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are outside dimensions.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
+    if(anyManual)method+=' Areas marked * were adjusted by hand from the worked-out figure: '+rows.map(function(g,i){return g.adj?'line '+(i+1)+' '+(g.adj>0?'+':'-')+Math.abs(g.adj)+'%':null;}).filter(Boolean).join(', ')+'.';
+    var blocks=[];
+    if(masked.length){
+      var names=masked.map(function(g){return g.name;}), list=names.length===1?names[0]:names.slice(0,-1).join(', ')+' and '+names[names.length-1];
+      blocks.push(['Surfaces to keep uncoated',(names.length===1?'This part has surfaces that remain uncoated: '+list+'.':'These parts have surfaces that remain uncoated: '+list+'.')+(info.iso?' They are shown in pink and arrowed in the picture.':'')+' Please mask them before coating. Their area ('+num(maskM2,3)+' m²) is not included in the total.',pink]);
+    }
+    if(info.notes)blocks.push(['Notes',info.notes]);
+    blocks.push(['How the area was worked out',method]);
+    var notesH=blocks.reduce(function(a,b){font(b[0]==='How the area was worked out'?8.5:9.5,'normal'); return a+5+doc.splitTextToSize(b[1],iw).length*(b[0]==='How the area was worked out'?4.2:4.8)+4;},0);
+    // picture: one page for sub-assembly and whole-selection reports
     if(info.iso){
+      var ih=iw*0.56;
+      if(onePage)ih=Math.max(40,Math.min(iw*0.56,(H-16)-y-tableH-notesH-11));
       btn.textContent='Making the picture…'; await new Promise(function(r){setTimeout(r,0);});
-      var shown=state.meshes.filter(function(m){return m.visible;}), other=shown.some(function(m){return !m.userData.paintIn;});
-      var iw=W-2*M, ih=iw*0.56, img=modelPicture(shown,1600,Math.round(1600*0.56));
+      var shown=state.meshes.filter(function(m){return m.visible;}), other=shown.some(function(m){return !m.userData.paintIn;}), arrows=[];
+      paint.masks.forEach(function(e){if(e.mesh.visible)arrows.push(faceCentre(e.mesh,e.shell));});
+      var pw=1600, img=modelPicture(shown,pw,Math.round(pw*ih/iw),arrows);
       doc.addImage(img,'JPEG',M,y,iw,ih); doc.setDrawColor.apply(doc,line); doc.rect(M,y,iw,ih);
-      font(8,'normal',mute); txt('Isometric view of the assembly. Surfaces to coat are shown in green'+(other?', other parts are shown faint.':'.'),M,y+ih+4.5);
-      y+=ih+11;
-      if(y>H-60){doc.addPage(); y=M+4;}
+      font(8,'normal',mute); txt('Isometric view of the assembly. Surfaces to coat are green'+(arrows.length?', surfaces to keep uncoated are pink (arrowed)':'')+(other?', other parts are faint.':'.'),M,y+ih+4.5);
+      y+=ih+10;
+      if(!onePage&&y>H-60){doc.addPage(); y=M+4;}
     }
     // table
-    var cols=[['#',8,'l'],[{sub:'Sub-assembly',whole:'Item',part:'Part'}[reportState.mode]||'Item',54,'l'],['Qty',10,'r'],['  Material',32,'l'],['Size L × W × H mm',36,'r'],['Area each m²',21,'r'],['Area total m²',21,'r']], tx=[M];
-    cols.forEach(function(c,i){tx.push(tx[i]+c[1]);});
     function head(){font(8,'bold',mute); cols.forEach(function(c,i){txt(c[0],c[2]==='r'?tx[i+1]-1:tx[i]+1,y,c[2]==='r'?{align:'right'}:{});}); y+=2; doc.setDrawColor.apply(doc,line); doc.line(M,y,W-M,y); y+=4.5;}
     head();
     rows.forEach(function(g,i){
-      var nameL=doc.splitTextToSize(g.name,cols[1][1]-2), rh=Math.max(1,nameL.length)*4.2+1.6;
-      if(y+rh>H-22){doc.addPage(); y=M+4; head();}
-      var m=matInfo(g.mat), mk=g.adj?'*':'', ea=effArea(g), cells=[String(i+1),nameL,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
+      var mt=meta[i];
+      if(!onePage&&y+mt.rh>H-22){doc.addPage(); y=M+4; head();}
+      var m=matInfo(g.mat), mk=g.adj?'*':'', ea=effArea(g), cells=[String(i+1),mt.nl,String(g.qty),'  '+(m?m[1]:'Not set'),g.dims.join(' × '),mk+num(ea,3),mk+num(ea*g.qty,3)];
       font(8.5,'normal'); cells.forEach(function(v,k){var c=cols[k]; if(k===3&&!m)doc.setTextColor.apply(doc,mute); txt(v,c[2]==='r'?tx[k+1]-1:tx[k]+1,y,c[2]==='r'?{align:'right'}:{}); doc.setTextColor.apply(doc,ink);});
-      y+=rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
+      if(g.mask){font(7.5,'bold',pink); txt('Has surfaces to keep uncoated',tx[1]+1,y+mt.nl.length*4.2);}
+      y+=mt.rh-3; doc.setDrawColor(232,236,239); doc.line(M,y,W-M,y); y+=4.2;
     });
     font(8.5,'bold'); txt('Total',tx[1]+1,y); txt(String(pieces),tx[3]-1,y,{align:'right'}); txt(num(area,3),tx[7]-1,y,{align:'right'}); y+=8;
-    // notes and method
-    var st=paint.res.settings, method='Areas are the outside surfaces worked out from the 3D model. Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than '+num(Math.max(st.gap,paint.res.grid.closes),0)+' mm are not counted. Tube openings up to '+st.capW+' × '+st.capH+' mm were treated as closed unless the tube is shorter than '+st.minLen+' mm. Sizes are the outside dimensions of each item.'+(allW?' Weights are estimated from the model volume and the material shown.':'');
-    if(anyManual)method+=' Areas marked * were adjusted by hand from the worked-out figure: '+rows.map(function(g,i){return g.adj?'line '+(i+1)+' '+(g.adj>0?'+':'-')+Math.abs(g.adj)+'%':null;}).filter(Boolean).join(', ')+'.';
-    var blocks=[]; if(info.notes)blocks.push(['Notes',info.notes]); blocks.push(['How the area was worked out',method]);
-    blocks.forEach(function(b){var L=doc.splitTextToSize(b[1],W-2*M); if(y+6+L.length*4.2>H-18){doc.addPage(); y=M+4;} font(9,'bold'); txt(b[0],M,y); y+=4.8; font(8.5,'normal',mute); doc.text(L,M,y); y+=L.length*4.2+4;});
+    // notes, with the uncoated-surfaces note first
+    blocks.forEach(function(b){
+      var small=b[0]==='How the area was worked out', fs=small?8.5:9.5, lh2=small?4.2:4.8;
+      font(fs,'normal'); var L=doc.splitTextToSize(b[1],iw);
+      if(!onePage&&y+6+L.length*lh2>H-18){doc.addPage(); y=M+4;}
+      font(9.5,'bold',b[2]||ink); txt(b[0],M,y); y+=5; font(fs,'normal',b[2]?ink:mute); doc.text(L,M,y,{lineHeightFactor:small?1.18:1.2}); y+=L.length*lh2+4;
+    });
     var np=doc.getNumberOfPages();
     for(var p=1;p<=np;p++){doc.setPage(p); font(7.5,'normal',mute); txt((info.job?info.job+', ':'')+(info.model||''),M,H-8); txt('Page '+p+' of '+np,W-M,H-8,{align:'right'});}
     doc.save((info.job||info.model||'Coating')+' coating schedule.pdf'); histSave(info);
-    toast('Coating report saved');
+    toast('Coating report saved'+(np>1&&onePage?' (it needed '+np+' pages)':''));
   }catch(e){console.error(e); toast('The PDF couldn’t be made: '+e.message);}
   finally{btn.disabled=false; btn.textContent='Create PDF';}
 }
@@ -2580,5 +2732,5 @@ $('btnMore').onclick=function(){
   menuBelow(b,items);
 };
 
-window.__edv={paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,reportRows:reportRows,fillReportTable:fillReportTable,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
+window.__edv={toggleMask:toggleMask,markPick:markPick,maskSummary:maskSummary,setMarking:setMarking,faceCentre:faceCentre,paint:paint,runPaint:runPaint,setPaint:setPaint,clearPaint:clearPaint,reportRows:reportRows,itemDims:itemDims,openReport:openReport,reportPDF:reportPDF,modelPicture:modelPicture,histGet:histGet,reportRows:reportRows,fillReportTable:fillReportTable,exportMenu:exportMenu,faceProfile:faceProfile,dxfText:dxfText,exportFaceDXF:exportFaceDXF,exportSTL:exportSTL,closeFile:closeFile,setTreeW:setTreeW,measureNumber:measureNumber,openFile:openFile,addRecent:addRecent,refreshRecent:refreshRecent,undo:undo,redo:redo,toggleTransparent:toggleTransparent,partRows:partRows,section:section,setSection:setSection,d2Snap:d2Snap,openMarkup:openMarkup,composeSnapshot:composeSnapshot,captureView:captureView,applyView:applyView,contextMenu:contextMenu,hoverNode:hoverNode,d2World:d2World,d2Fit:d2Fit,d2:d2,measurePick2d:measurePick2d,d2Pick:d2Pick,d2SetSel:d2SetSel,d2BoxSelect:d2BoxSelect,applyModelTransform:applyModelTransform,normalTo:normalTo,setDisplay:setDisplay,faceEntity:faceEntity,hover:hover,rotateAbout:rotateAbout,boxSelect:boxSelect,setSelection:setSelection,updateMass:updateMass,state:state,get camera(){return camera;},controls:controls,measurePick:measurePick,toScreen:toScreen,rectOf:rectOf,zoomAt:zoomAt};
 })();

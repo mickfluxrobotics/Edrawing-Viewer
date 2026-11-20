@@ -252,6 +252,10 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 .help::-webkit-scrollbar-thumb,.rp-table::-webkit-scrollbar-thumb,.reportdlg::-webkit-scrollbar-thumb,.tree::-webkit-scrollbar-thumb,.props::-webkit-scrollbar-thumb,.menu::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--muted) 55%,transparent);border-radius:8px;border:2px solid transparent;background-clip:padding-box;min-height:40px}
 .help::-webkit-scrollbar-thumb:hover,.rp-table::-webkit-scrollbar-thumb:hover,.reportdlg::-webkit-scrollbar-thumb:hover,.tree::-webkit-scrollbar-thumb:hover,.props::-webkit-scrollbar-thumb:hover{background:var(--muted);background-clip:padding-box}
 .help::-webkit-scrollbar-track,.rp-table::-webkit-scrollbar-track,.reportdlg::-webkit-scrollbar-track,.tree::-webkit-scrollbar-track,.props::-webkit-scrollbar-track,.menu::-webkit-scrollbar-track{background:color-mix(in srgb,var(--line) 45%,transparent);border-radius:8px}
+.view.marking canvas{cursor:crosshair}
+.pmask{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px;font-size:12.5px;color:var(--muted)}
+#pMark[aria-pressed="true"]{background:#E8336B;border-color:#E8336B;color:#fff}
+.hint.mk{color:#C42C5C}
 @media (max-width:760px){
   .tool{display:none}
   .rp-grid{grid-template-columns:1fr}
@@ -269,7 +273,7 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 <body>
 <div class="app">
   <header>
-    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 14)</small></div>
+    <div class="brand"><span class="brand-row">eDrawings Viewer</span><small id="title">eDrawings, STEP, STL, 3MF, DXF and DWG (version 15)</small></div>
     <button class="btn only-narrow" id="btnTree" aria-expanded="false" aria-controls="aside">Parts</button>
     <div class="tools">
       <div class="mwrap"><button class="btn primary mbtn" id="mFile" aria-haspopup="true" aria-expanded="false">File <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -397,8 +401,9 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
         <dl>
           <dt>Paint area</dt><dd>Works out the outside surface area, the area a coater would paint. Select the weldments or parts to include first (otherwise everything visible is used), then press Calculate. Counted surfaces turn green and everything else grey.</dd>
           <dt>What isn’t counted</dt><dd>Surfaces inside closed tubes, faces pressed together at joints and gaps narrower than the gap setting. Hollow tubes with openings up to the size you set (110 × 110 mm to start with) are capped (shown in orange) unless shorter than the minimum length (150 mm), so their insides aren’t counted.</dd>
+          <dt>Uncoated surfaces</dt><dd>In the Paint area panel, press Mark uncoated faces, then click faces that must stay free of coating (bearing seats, threads, mating faces). They turn pink, come straight off the area and are remembered for this file. Click a face again to unmark it; Esc when done; Clear marks removes them all. The report adds a note naming the parts and arrows pointing to them in the picture.</dd>
           <dt>Accuracy</dt><dd>Fast, Normal or Fine sets the grid used to decide what’s inside and outside. Areas always come from the model’s real surfaces. Big selections use a coarser grid automatically, and the panel says how big a gap that closes.</dd>
-          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater. Choose how it lists things under List: each sub-assembly (the default, one line per sub-assembly with its overall size), the whole selection as one line, or each part. Each line shows quantity, material, outside size, area and estimated weight, with an isometric picture of the whole assembly. Choose materials in the report window; they’re remembered by name. Next to each worked-out area, Adjust raises or lowers it by up to 50% (Adjust all does every line); the report marks adjusted lines with * and says by how much. Company, contact, coating and notes each have a drop-down arrow listing your last three entries. A CSV of the same table is there too.</dd>
+          <dt>Coating report</dt><dd>From the Paint area panel or Export: a PDF schedule for your coater, with the overall size of the assembly (L × W × H) at the top whatever the list style. Choose how it lists things under List: each sub-assembly (the default), the whole selection as one line, or each part. Each line shows quantity, material, outside size, area and estimated weight, under an isometric picture of the whole assembly. Sub-assembly and whole-selection reports fit on one page; each-part reports run on as needed. Faces marked uncoated appear in pink with arrows, and a note lists the parts to mask. Next to each worked-out area, Adjust raises or lowers it by up to 50% (Adjust all does every line); adjusted lines are marked *. Company, contact, coating and notes each have a drop-down of your last three entries. A CSV of the same table is there too.</dd>
         </dl>
         <h3>Export</h3>
         <dl>
@@ -471,14 +476,14 @@ aside{border-right:1px solid var(--line);display:flex;flex-direction:column;min-
 </div>
 <div id="printArea"></div>
 <style id="pageStyle"></style>
-<script src="three.min.js?v=14"></script>
-<script src="OrbitControls.js?v=14"></script>
-<script src="LineSegmentsGeometry.js?v=14"></script>
-<script src="LineMaterial.js?v=14"></script>
-<script src="LineSegments2.js?v=14"></script>
-<script src="fflate.js?v=14"></script>
-<script src="easm-core.js?v=14"></script>
-<script src="formats.js?v=14"></script>
-<script src="app.js?v=14"></script>
+<script src="three.min.js?v=15"></script>
+<script src="OrbitControls.js?v=15"></script>
+<script src="LineSegmentsGeometry.js?v=15"></script>
+<script src="LineMaterial.js?v=15"></script>
+<script src="LineSegments2.js?v=15"></script>
+<script src="fflate.js?v=15"></script>
+<script src="easm-core.js?v=15"></script>
+<script src="formats.js?v=15"></script>
+<script src="app.js?v=15"></script>
 </body>
 </html>

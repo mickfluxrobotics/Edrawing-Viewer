@@ -110,7 +110,7 @@ function paintCompute(inp, progress) {
   // ---------- classify triangles ----------
   var total = 0, counted = 0;
   bodies.forEach(function (b, bi) {
-    var p = b.pos, ix = b.idx, nt = ix.length / 3, flags = new Uint8Array(nt), bc = 0, inner = b.tube && b.tube.capped ? b.tube.innerTris : null, part = [];
+    var p = b.pos, ix = b.idx, nt = ix.length / 3, flags = new Uint8Array(nt), frac = new Float32Array(nt), bc = 0, inner = b.tube && b.tube.capped ? b.tube.innerTris : null, part = [];
     for (var t = 0; t < nt; t++) {
       var a = ix[3 * t] * 3, c = ix[3 * t + 1] * 3, d = ix[3 * t + 2] * 3, A = triArea(p, a, c, d);
       total += A;
@@ -128,6 +128,7 @@ function paintCompute(inp, progress) {
       }
       var f = tot ? hit / tot : 0;
       if (f >= 0.5) flags[t] = 1;
+      frac[t] = f;
       // a large triangle that is only partly outside: split it up so the colouring follows the real boundary
       if (f > 0.02 && f < 0.98 && L > 3 * h) {
         flags[t] = 2;
@@ -145,7 +146,7 @@ function paintCompute(inp, progress) {
       bc += A * f;
     }
     counted += bc;
-    out.bodies.push({ id: b.id, flags: flags, part: new Float32Array(part), area: b.area, counted: bc, tube: b.tube ? { capped: b.tube.capped, reason: b.tube.reason, w: b.tube.w, h: b.tube.h, len: b.tube.len } : null });
+    out.bodies.push({ id: b.id, flags: flags, frac: frac, part: new Float32Array(part), area: b.area, counted: bc, tube: b.tube ? { capped: b.tube.capped, reason: b.tube.reason, w: b.tube.w, h: b.tube.h, len: b.tube.len } : null });
     if (bi % 50 === 0) progress('Measuring the outside surfaces', 0.75 + 0.25 * bi / bodies.length);
   });
   function probe(x, y, z, dx, dy, dz) { // walk out from the surface; the first cube that isn't surface decides
@@ -315,7 +316,7 @@ else if (typeof self !== 'undefined') {
   self.onmessage = function (ev) {
     try {
       var res = paintCompute(ev.data, function (msg, f) { self.postMessage({ progress: f, msg: msg }); });
-      var tr = []; res.bodies.forEach(function (b) { tr.push(b.flags.buffer, b.part.buffer); });
+      var tr = []; res.bodies.forEach(function (b) { tr.push(b.flags.buffer, b.frac.buffer, b.part.buffer); });
       self.postMessage({ result: res }, tr);
     } catch (e) { self.postMessage({ error: String((e && e.message) || e) }); }
   };
