@@ -6,7 +6,16 @@ var EASM = (function () {
   function unpack(bytes) {
     var files;
     try { files = fflate.unzipSync(bytes); }
-    catch (e) { throw new Error('This file isn’t a ZIP-based eDrawings file (.easm or .eprt).'); }
+    catch (e) {
+      // Older eDrawings files ("2008+ archive") put a short header before the ZIP data.
+      // Find the first local-file signature (PK\x03\x04) and unzip from there.
+      var start = -1, lim = Math.min(bytes.length - 4, 4096);
+      for (var k = 1; k <= lim; k++) {
+        if (bytes[k] === 0x50 && bytes[k + 1] === 0x4b && bytes[k + 2] === 0x03 && bytes[k + 3] === 0x04) { start = k; break; }
+      }
+      try { if (start < 0) throw e; files = fflate.unzipSync(bytes.subarray(start)); }
+      catch (e2) { throw new Error('This file isn’t a ZIP-based eDrawings file (.easm or .eprt).'); }
+    }
     var names = Object.keys(files);
     var em = null, preview = null;
     for (var i = 0; i < names.length; i++) {
@@ -61,6 +70,8 @@ var EASM = (function () {
     if (!second) return first;
     return (second.shellCount - second.scanned) > (first.shellCount - first.scanned) ? second : first;
   }
+  // Record opcodes parseWith understands (used to resync after variable-length records).
+  var KNOWN = (function () { var k = {}; [0x28,0x29,0x5b,0x55,0x16,0x7d,0x68,0x4a,0x48,0x56,0x25,0x24,0x46,0x2a,0x26,0x2d,0x0d,0x40,0x2b,0x52,0x7e,0x22,0x3d,0x0e,0x07,0x3c,0x7b,0x74,0x73,0x71,0x53,0x30].forEach(function (c) { k[c] = 1; }); return k; })();
   function parseWith(d, X) {
     var dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
     var N = d.length;
@@ -127,24 +138,41 @@ var EASM = (function () {
           case 0x7d: p += 45 + X; p += 1 + d[p]; break; // } view
           case 0x68: p += 1; break; // h handedness
           case 0x4a: p += 1 + d[p]; p += 2 + u16(p); break; // J line style
-          case 0x48: var hm = u16(p); p += 4 + ((hm & 4) ? 1 : 0); break; // H heuristics
+          case 0x48: var hm = u16(p); p += 4 + ((hm & 4) ? 1 : 0) + ((hm & 0x8000) ? 4 : 0); break; // H heuristics (+ extended mask/value when bit 15 is set)
           case 0x56: // V visibility
             // mask then value, each: low byte, +2 bytes if bit 7 is set, +1 more if the top bit of those is set
             var vm0 = d[p], vext = (vm0 & 0x80) ? 2 : 0, vext2 = (vext && (d[p + 2] & 0x80)) ? 1 : 0, vlen = 1 + vext + vext2;
             segs.get(cur).vis = [vm0, d[p + vlen]];
             p += 2 * vlen;
+            // Some older files add a short sub-option block (e.g. 04 04) after the value; skip up to 4 bytes to the next record.
+            if (!KNOWN[d[p]]) { for (var vx = 1; vx <= 4; vx++) if (KNOWN[d[p + vx]]) { p += vx; break; } }
             break;
           case 0x25: // % modelling matrix (12 floats, row-vector 4x3; HSF 20+ puts a flag byte first)
             var m = new Float32Array(12);
             for (var k = 0; k < 12; k++) m[k] = dv.getFloat32(p + X + 4 * k, true);
             segs.get(cur).matrix = m; p += 48 + X; break;
           case 0x24: p += 48; break; // $ texture matrix
+          case 0x46: { // F text font: mask, value, then name / size / tolerance / transforms / rotation / slant / width scale
+            var fm = d[p]; p += 2;
+            if (fm & 0x80) throw 'stop'; // extended font options not handled
+            if (fm & 0x01) p += 1 + d[p];
+            if (fm & 0x02) p += 5;
+            if (fm & 0x04) p += 5;
+            if (fm & 0x08) p += 1;
+            if (fm & 0x10) p += 4;
+            if (fm & 0x20) p += 4;
+            if (fm & 0x40) p += 4;
+            break;
+          }
+          case 0x2a: p += 1; break; // * text alignment
+          case 0x30: p += 4; break; // 0 (4-byte value seen before the 3D model segment in older files)
           case 0x26: { // & repeat an earlier surface with a transform
             var rm = new Float32Array(12);
             for (var rk2 = 0; rk2 < 12; rk2++) rm[rk2] = dv.getFloat32(p + 17 + 4 * rk2, true);
             repeats.push({ src: i32(p), key: i32(p + 8), m: rm, path: cur }); // copy surface src into placeholder key
             p += 65; break;
           }
+          case 0x2d: case 0x0d: // - line pattern, \r edge pattern (same layout as the marker symbol)
           case 0x40: if (d[p] === 0xff) { p += 1; p += 1 + d[p]; } else p += 1; break; // @ marker symbol
           case 0x2b: p += 4; break; // + marker size
           case 0x52: p = skipRendering(p); break; // R rendering options
@@ -157,7 +185,10 @@ var EASM = (function () {
           case 0x3d: case 0x0e: p += 4; break; // line / edge weight
           case 0x07: p += 1 + d[p]; break; // callback
           case 0x3c: case 0x7b: // < include, { style
-            p += X; L = d[p]; name = latin.decode(d.subarray(p + 1, p + 1 + L)); p += 1 + L;
+            // Older files with conditional styles also start with a 0 byte and add a condition name after the path.
+            var cond = !X && d[p] === 0 && d[p + 1] > 0 && printable(p + 2, p + 2 + d[p + 1]);
+            p += X || (cond ? 1 : 0); L = d[p]; name = latin.decode(d.subarray(p + 1, p + 1 + L)); p += 1 + L;
+            if (cond && d[p] > 0 && d[p] < 0x80 && printable(p + 1, p + 1 + d[p]) && KNOWN[d[p + 1 + d[p]]]) p += 1 + d[p];
             if (c === 0x3c) segs.get(cur).includes.push(normPath(cur, name));
             break;
           case 0x74: p += 1 + d[p]; p += 1 + d[p]; p += 6; break; // t texture
